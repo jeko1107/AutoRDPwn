@@ -70,7 +70,7 @@ public class WTS {
 "`$tok = [IntPtr]::Zero`n" +
 "`$q = `$false`n" +
 "try { `$q = [WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok); L (`"QT RETURNED: `" + `$q + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } catch { L (`"QT THREW: `" + `$_.Exception.Message) }`n" +
-"if (`$q) { L 'USERTOKEN OK' } else {`n" +
+"if (`$q) { L ('USERTOKEN OK TOKEN=' + `$tok.ToString() + ' ZERO=' + (`$tok -eq [IntPtr]::Zero)); `$dup = [IntPtr]::Zero; `$dr = [WTS]::DuplicateTokenEx(`$tok, 0x18B, [IntPtr]::Zero, 2, 1, [ref]`$dup); L ('DUP ' + `$dr + ' ERR ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error() + ' NEWTOK=' + `$dup.ToString()); if (`$dr) { `$tok = `$dup } } else {`n" +
 "    `$wl = Get-Process winlogon | Where-Object { `$_.SessionId -eq `$sessId } | Select-Object -First 1`n" +
 "    if (`$wl) { L (`"WINLOGON FOUND PID `" + `$wl.Id)`n" +
 "        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)`n" +
@@ -136,7 +136,7 @@ public class WTS {
 "`$tok = [IntPtr]::Zero`n" +
 "`$q = `$false`n" +
 "try { `$q = [WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok); L (`"QT RETURNED: `" + `$q + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } catch { L (`"QT THREW: `" + `$_.Exception.Message) }`n" +
-"if (`$q) { L 'USERTOKEN OK' } else {`n" +
+"if (`$q) { L ('USERTOKEN OK TOKEN=' + `$tok.ToString() + ' ZERO=' + (`$tok -eq [IntPtr]::Zero)); `$dup = [IntPtr]::Zero; `$dr = [WTS]::DuplicateTokenEx(`$tok, 0x18B, [IntPtr]::Zero, 2, 1, [ref]`$dup); L ('DUP ' + `$dr + ' ERR ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error() + ' NEWTOK=' + `$dup.ToString()); if (`$dr) { `$tok = `$dup } } else {`n" +
 "    `$wl = Get-Process winlogon | Where-Object { `$_.SessionId -eq `$sessId } | Select-Object -First 1`n" +
 "    if (`$wl) { L (`"WINLOGON FOUND PID `" + `$wl.Id)`n" +
 "        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)`n" +
