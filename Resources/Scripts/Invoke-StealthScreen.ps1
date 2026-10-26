@@ -68,8 +68,9 @@ public class WTS {
 "`$sessId = [WTS]::WTSGetActiveConsoleSessionId()`n" +
 "L (`"SESS: `" + `$sessId)`n" +
 "`$tok = [IntPtr]::Zero`n" +
-"if ([WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok)) { L 'USERTOKEN OK' } else {`n" +
-"    L (`"USERTOKEN FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
+"`$q = `$false`n" +
+"try { `$q = [WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok); L (`"QT RETURNED: `" + `$q + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } catch { L (`"QT THREW: `" + `$_.Exception.Message) }`n" +
+"if (`$q) { L 'USERTOKEN OK' } else {`n" +
 "    `$wl = Get-Process winlogon | Where-Object { `$_.SessionId -eq `$sessId } | Select-Object -First 1`n" +
 "    if (`$wl) { L (`"WINLOGON FOUND PID `" + `$wl.Id)`n" +
 "        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)`n" +
@@ -133,8 +134,9 @@ public class WTS {
 "`$sessId = [WTS]::WTSGetActiveConsoleSessionId()`n" +
 "L (`"SESS: `" + `$sessId)`n" +
 "`$tok = [IntPtr]::Zero`n" +
-"if ([WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok)) { L 'USERTOKEN OK' } else {`n" +
-"    L (`"USERTOKEN FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
+"`$q = `$false`n" +
+"try { `$q = [WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok); L (`"QT RETURNED: `" + `$q + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } catch { L (`"QT THREW: `" + `$_.Exception.Message) }`n" +
+"if (`$q) { L 'USERTOKEN OK' } else {`n" +
 "    `$wl = Get-Process winlogon | Where-Object { `$_.SessionId -eq `$sessId } | Select-Object -First 1`n" +
 "    if (`$wl) { L (`"WINLOGON FOUND PID `" + `$wl.Id)`n" +
 "        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)`n" +
