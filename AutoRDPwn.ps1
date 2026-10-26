@@ -654,7 +654,7 @@ function Remove-Exclusions {
 
     if(!$prevAllowRPC){ Write-Host ; Write-Host "[i] $txt86" -ForegroundColor Green ; Start-Sleep -milliseconds 600
     invoke-command -session $RDP[0] -scriptblock { Restart-Computer -Force } 2>&1> $null ; Start-Sleep -seconds 60
-    $j = 0 ; do { $j++ ; Start-Sleep -milliseconds 3000 ; if($user){ $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate 2>&1> $null } else { $RDP = New-PSSession -Computer $computer -Authentication Negotiate 2>&1> $null } } until ($RDP -or $j -eq 30) }}
+    $j = 0 ; do { $j++ ; Start-Sleep -milliseconds 3000 ; if($user){ $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate 2>&1> $null } else { $RDP = New-PSSession -Computer $computer -Authentication Negotiate 2>&1> $null } } until ($RDP -or $j -eq 30) }
 
         if($version -Like '*Server*') { Write-Host "[!] $version $txt37" -ForegroundColor Red ; if(!$sticky) { invoke-command -session $RDP[0] -scriptblock { $Host.UI.RawUI.ForegroundColor = 'Green'
         (Get-CimInstance -ClassName Win32_TSGeneralSetting -Namespace root\cimv2\terminalservices -Filter "TerminalName='RDP-tcp'").SetUserAuthenticationRequired(0) 2>&1> $null
