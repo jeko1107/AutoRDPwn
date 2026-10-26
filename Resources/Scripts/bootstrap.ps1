@@ -16,8 +16,9 @@ if ($scriptPath) {
   $webclient = New-Object System.Net.WebClient
   $webclient.Proxy = [System.Net.WebRequest]::GetSystemWebProxy()
   $webclient.Proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-  $content = $webclient.DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/AutoRDPwn.ps1')
-  $main = [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$null, [ref]$null)
+  $cachebust = (Get-Date).Ticks
+  $content = $webclient.DownloadString("https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/AutoRDPwn.ps1?v=$cachebust")
   $block = [System.Management.Automation.ScriptBlock]::Create($content)
+  if ($content -match '/v:\$') { Write-Host "[+] Fresh script loaded (cache-busted)." -ForegroundColor Green }
   & $block @args
 }
