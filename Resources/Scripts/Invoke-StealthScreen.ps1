@@ -20,7 +20,7 @@ using System;
 using System.Runtime.InteropServices;
 public class WTS {
     [DllImport("kernel32.dll")] public static extern UInt32 WTSGetActiveConsoleSessionId();
-    [DllImport("advapi32.dll", SetLastError=true)] public static extern bool WTSQueryUserToken(UInt32 sessionId, out IntPtr Token);
+    [DllImport("wtsapi32.dll", SetLastError=true)] public static extern bool WTSQueryUserToken(UInt32 sessionId, out IntPtr Token);
     [DllImport("advapi32.dll", SetLastError=true)] public static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
     [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
     [DllImport("advapi32.dll", SetLastError=true)] public static extern bool DuplicateTokenEx(IntPtr hExistingToken, uint dwDesiredAccess, IntPtr lpTokenAttributes, int ImpersonationLevel, int TokenType, out IntPtr phNewToken);
@@ -76,7 +76,7 @@ public class WTS {
 "        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)`n" +
 "        L (`"OPENPROC ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
 "        if (`$h -ne [IntPtr]::Zero) {`n" +
-"            `$r = [WTS]::OpenProcessToken(`$h, 0x1F01FF, [ref]`$tok)`n" +
+"            `$r = [WTS]::OpenProcessToken(`$h, 0x18B, [ref]`$tok)`n" +
 "            L (`"OPENTOKEN `" + `$r + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
 "        }`n" +
 "    } else { L 'NO WINLOGON IN SESSION' }`n" +
@@ -142,7 +142,7 @@ public class WTS {
 "        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)`n" +
 "        L (`"OPENPROC ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
 "        if (`$h -ne [IntPtr]::Zero) {`n" +
-"            `$r = [WTS]::OpenProcessToken(`$h, 0x1F01FF, [ref]`$tok)`n" +
+"            `$r = [WTS]::OpenProcessToken(`$h, 0x18B, [ref]`$tok)`n" +
 "            L (`"OPENTOKEN `" + `$r + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
 "        }`n" +
 "    } else { L 'NO WINLOGON IN SESSION' }`n" +
