@@ -86,6 +86,7 @@ $txt83 = "Выберите метод проверки (хэш / пароль):`
 $txt84 = "Введите хеш NTLM:` "
 $txt85 = "Введите протокол, который вы хотите использовать (SMB / WMI):` "
 $txt86 = "Удалённой машине требуется перезагрузка для применения изменений, перезагрузка.."
+$txt87 = "Удалённый RPC shadow недоступен, вместо этого открывается полный сеанс удалённого рабочего стола.."
 $Pwn1  = "Set-NetConnectionProfile -InterfaceIndex ((Get-NetConnectionProfile).interfaceindex) -NetworkCategory Private ; winrm quickconfig -force ; Enable-PSRemoting -Force"
 $Pwn2  = "netsh advfirewall firewall set rule group = 'Удаленная помощь' new enable = Yes; netsh advfirewall firewall set rule group='Удаленный рабочий стол' new enable=yes ; Set-ExecutionPolicy Unrestricted -Force"
 $Pwn3  = "netsh advfirewall firewall set rule group = 'Обнаружение сети' new enable = Yes; netsh advfirewall firewall set rule group = 'Удаленное управление запланированными задачами' new enable = yes"
