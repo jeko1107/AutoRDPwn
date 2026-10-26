@@ -66,12 +66,19 @@ function Show-Menu { $Host.UI.RawUI.ForegroundColor = 'Gray'; if($nogui -like '-
 
 function Show-Modules { $Host.UI.RawUI.ForegroundColor = 'Gray'; if($nogui -like '-nogui') { $null } else {
      Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt17" -ForegroundColor Gray
+     Write-Host "     $txt88" -ForegroundColor DarkGray
      Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt50" -ForegroundColor Gray
+     Write-Host "     $txt89" -ForegroundColor DarkGray
      Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - Networking / Pivoting" -ForegroundColor Gray
+     Write-Host "     $txt90" -ForegroundColor DarkGray
      Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - Remote Desktop Forensics" -ForegroundColor Gray
+     Write-Host "     $txt91" -ForegroundColor DarkGray
      Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "5" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt64" -ForegroundColor Gray
+     Write-Host "     $txt92" -ForegroundColor DarkGray
      Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "6" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt68" -ForegroundColor Gray
+     Write-Host "     $txt93" -ForegroundColor DarkGray
      Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "7" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt69" -ForegroundColor Gray
+     Write-Host "     $txt94" -ForegroundColor DarkGray
      Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
      Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
      Write-Host }}
@@ -306,10 +313,15 @@ function Remove-Exclusions {
 
         if($module -like '1') { Show-Banner
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - Named Pipe Remote Shell (SMB)" -ForegroundColor Gray
+        Write-Host "     $txt95" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt39" -ForegroundColor Gray
+        Write-Host "     $txt96" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - PowerShell HTTP-RevShell (HTTP/S)" -ForegroundColor Gray
+        Write-Host "     $txt97" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt51" -ForegroundColor Gray
+        Write-Host "     $txt98" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "5" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt52" -ForegroundColor Gray
+        Write-Host "     $txt99" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
         Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
@@ -339,9 +351,13 @@ function Remove-Exclusions {
 
         if($module -like '2') { Show-Banner
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt9" -ForegroundColor Gray
+        Write-Host "     $txt100" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt10" -ForegroundColor Gray
+        Write-Host "     $txt101" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt49" -ForegroundColor Gray
+        Write-Host "     $txt102" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt59" -ForegroundColor Gray    
+        Write-Host "     $txt103" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
         Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine 
@@ -377,9 +393,13 @@ function Remove-Exclusions {
 
         if($module -like '3') { Show-Banner
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - TCP Port Scan" -ForegroundColor Gray
+        Write-Host "     $txt104" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - Native Port Forwarding" -ForegroundColor Gray
+        Write-Host "     $txt105" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - Powershell Web Server" -ForegroundColor Gray
+        Write-Host "     $txt106" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - Network Creds Scanner" -ForegroundColor Gray
+        Write-Host "     $txt107" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
         Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
@@ -457,8 +477,11 @@ function Remove-Exclusions {
    
         if($module -like '4') { Show-Banner
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt11" -ForegroundColor Gray
+        Write-Host "     $txt108" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt12" -ForegroundColor Gray
+        Write-Host "     $txt109" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt61" -ForegroundColor Gray
+        Write-Host "     $txt110" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
         Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
@@ -482,8 +505,11 @@ function Remove-Exclusions {
         
         if($module -like '5') { Show-Banner
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - Sticky Keys Hacking" -ForegroundColor Gray
+        Write-Host "     $txt111" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - Metasploit Reverse Shell" -ForegroundColor Gray
+        Write-Host "     $txt112" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - Remote Keylogger" -ForegroundColor Gray
+        Write-Host "     $txt113" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
         Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
@@ -507,8 +533,11 @@ function Remove-Exclusions {
 
         if($module -like '6') { Show-Banner
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt70" -ForegroundColor Gray
+        Write-Host "     $txt114" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt71" -ForegroundColor Gray
+        Write-Host "     $txt115" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt72" -ForegroundColor Gray
+        Write-Host "     $txt116" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
         Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
@@ -532,9 +561,13 @@ function Remove-Exclusions {
 
         if($module -like '7') { Show-Banner
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt18" -ForegroundColor Gray
+        Write-Host "     $txt117" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt62" -ForegroundColor Gray
+        Write-Host "     $txt118" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt67" -ForegroundColor Gray
+        Write-Host "     $txt119" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt79" -ForegroundColor Gray
+        Write-Host "     $txt120" -ForegroundColor DarkGray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
         Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
         Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
