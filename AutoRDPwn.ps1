@@ -705,6 +705,21 @@ function Get-ARActionCatalog {
     $items.Add((New-ARAction -Id '207' -Title (Get-ARText 'txt165' 'Credential spray') -Description 'Try one password against a list of users over SMB and report the hits' -Handler 'Invoke-ARAttackCredentialSpray' -NeedsSession $false))
     $items.Add((New-ARAction -Id '901' -Title (Get-ARText 'txt171' 'File exfiltration') -Description 'Zip a folder on the target and pull the archive back to the operator' -Handler 'Invoke-ARModuleFileExfil' -NeedsSession $true))
 
+    $items.Add((New-ARGroup -Title (Get-ARText 'txt207' 'Discovery') -Description (Get-ARText 'txt208' 'Enumerate the host, its accounts, its defences and its exposure')))
+    $items.Add((New-ARAction -Id '320' -Title (Get-ARText 'txt194' 'Host audit') -Description 'Collect OS build, uptime, domain, hotfix level and hardware in one pass' -Handler 'Invoke-ARModuleHostAudit' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '321' -Title (Get-ARText 'txt195' 'AV and EDR enumeration') -Description 'List registered antivirus products, their real-time state and any EDR drivers loaded' -Handler 'Invoke-ARModuleAvEnum' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '322' -Title (Get-ARText 'txt196' 'SMB shares') -Description 'Enumerate SMB shares with their paths, ACLs and whether they allow anonymous access' -Handler 'Invoke-ARModuleShareEnum' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '323' -Title (Get-ARText 'txt197' 'Local administrators') -Description 'Show every member of the local Administrators group with account type and source' -Handler 'Invoke-ARModuleLocalAdmins' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '324' -Title (Get-ARText 'txt198' 'Installed software') -Description 'List installed applications with version and publisher from the registry uninstall keys' -Handler 'Invoke-ARModuleSoftwareEnum' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '325' -Title (Get-ARText 'txt199' 'Scheduled tasks') -Description 'Dump scheduled tasks with their triggers, run-as account and executed command' -Handler 'Invoke-ARModuleTaskEnum' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '326' -Title (Get-ARText 'txt200' 'Services') -Description 'Enumerate services with binary path, start mode, state and unquoted path findings' -Handler 'Invoke-ARModuleServiceEnum' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '327' -Title (Get-ARText 'txt201' 'Autoruns') -Description 'Collect Run keys, startup folders and logon scripts that survive a reboot' -Handler 'Invoke-ARModuleAutoruns' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '328' -Title (Get-ARText 'txt202' 'Domain information') -Description 'Query the domain for its controllers, trusts, password policy and privileged groups' -Handler 'Invoke-ARModuleDomainInfo' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '329' -Title (Get-ARText 'txt203' 'Network configuration') -Description 'Dump interfaces, addresses, gateways, DNS servers and routes of the target' -Handler 'Invoke-ARModuleNetworkConfig' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '330' -Title (Get-ARText 'txt204' 'ARP and connections') -Description 'Read the ARP cache and the established TCP connections with their owning process' -Handler 'Invoke-ARModuleArpTable' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '331' -Title (Get-ARText 'txt205' 'SMB audit') -Description 'Check SMB signing, dialect and guest access to spot relay and downgrade paths' -Handler 'Invoke-ARModuleSmbAudit' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '332' -Title (Get-ARText 'txt206' 'Patch audit') -Description 'Compare installed hotfixes against missing patches and report the exposure' -Handler 'Invoke-ARModulePatchAudit' -NeedsSession $false))
+
     $items.Add((New-ARGroup -Title (Get-ARText 'txt126' 'Remote Desktop Forensics') -Description (Get-ARText 'txt142' 'Recover session history and enumerate local accounts')))
     $items.Add((New-ARAction -Id '401' -Title (Get-ARText 'txt11' 'Rebuild the image cache') -Description (Get-ARText 'txt129' 'Recover the RDP session history cached on this computer') -Handler 'Invoke-ARModuleRdpCaching' -NeedsTarget $false -NeedsSession $false))
     $items.Add((New-ARAction -Id '402' -Title (Get-ARText 'txt127' 'List local users and groups') -Description (Get-ARText 'txt109' 'List every user with SID, groups and last logon details') -Handler 'Invoke-ARModuleListUsers'))
@@ -6311,6 +6326,1259 @@ function Invoke-ARAttackCachedLogons {
     }
     Write-ARInfo 'Read-only: no value was written and nothing needs restoring.'
     Set-ARStatus 'Cached logon state inspected' 'Ok'
+}
+
+function Invoke-ARModuleHostAudit {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Host audit'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $facts = New-Object System.Collections.Generic.List[object]
+        $truncated = New-Object System.Collections.Generic.List[string]
+        try {
+            $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+            $facts.Add([pscustomobject]@{ Fact = 'OS'; Value = [string]$os.Caption })
+            $facts.Add([pscustomobject]@{ Fact = 'Version'; Value = [string]$os.Version })
+            $facts.Add([pscustomobject]@{ Fact = 'Build'; Value = [string]$os.BuildNumber })
+            $facts.Add([pscustomobject]@{ Fact = 'Architecture'; Value = [string]$os.OSArchitecture })
+        }
+        catch { $facts.Add([pscustomobject]@{ Fact = 'OS'; Value = ('unavailable: ' + $_.Exception.Message) }) }
+        try {
+            $hotfixes = @(Get-CimInstance -ClassName Win32_QuickFixEngineering -ErrorAction Stop | Select-Object -First ($cap + 1))
+            $hotfixCount = $hotfixes.Count
+            if ($hotfixCount -gt $cap) { $hotfixCount = $cap; $truncated.Add('hotfixes') }
+            $facts.Add([pscustomobject]@{ Fact = 'Hotfixes'; Value = [string]$hotfixCount })
+        }
+        catch { $facts.Add([pscustomobject]@{ Fact = 'Hotfixes'; Value = ('unavailable: ' + $_.Exception.Message) }) }
+        try {
+            $computer = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+            $facts.Add([pscustomobject]@{ Fact = 'Computer'; Value = [string]$computer.Name })
+            if ([bool]$computer.PartOfDomain) { $facts.Add([pscustomobject]@{ Fact = 'Domain'; Value = [string]$computer.Domain }) }
+            else { $facts.Add([pscustomobject]@{ Fact = 'Workgroup'; Value = [string]$computer.Domain }) }
+        }
+        catch { $facts.Add([pscustomobject]@{ Fact = 'Computer'; Value = ('unavailable: ' + $_.Exception.Message) }) }
+        try {
+            $products = @(Get-CimInstance -Namespace 'root\SecurityCenter2' -ClassName AntiVirusProduct -ErrorAction Stop | Select-Object -First 16)
+            if ($products.Count -eq 0) { $facts.Add([pscustomobject]@{ Fact = 'AV product'; Value = 'none registered' }) }
+            else { $facts.Add([pscustomobject]@{ Fact = 'AV product'; Value = ((($products | ForEach-Object { [string]$_.displayName }) -join '; ')) }) }
+        }
+        catch { $facts.Add([pscustomobject]@{ Fact = 'AV product'; Value = 'SecurityCenter2 not available' }) }
+        try {
+            Add-Type -AssemblyName System.DirectoryServices.AccountManagement -ErrorAction Stop
+            $context = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('Machine', $env:COMPUTERNAME)
+            $group = [System.DirectoryServices.AccountManagement.GroupPrincipal]::FindByIdentity($context, [System.DirectoryServices.AccountManagement.IdentityType]::Sid, 'S-1-5-32-544')
+            if ($null -eq $group) { throw 'the Administrators group was not found by SID' }
+            $members = @($group.GetMembers() | Select-Object -First ($cap + 1))
+            $adminCount = $members.Count
+            if ($adminCount -gt $cap) { $adminCount = $cap; $truncated.Add('local administrators') }
+            $facts.Add([pscustomobject]@{ Fact = 'Local admins'; Value = [string]$adminCount })
+            $group.Dispose()
+            $context.Dispose()
+        }
+        catch { $facts.Add([pscustomobject]@{ Fact = 'Local admins'; Value = ('unavailable: ' + $_.Exception.Message) }) }
+        try {
+            $shares = @()
+            try { $shares = @(Get-SmbShare -ErrorAction Stop | Select-Object -First ($cap + 1)) }
+            catch { $shares = @(Get-CimInstance -ClassName Win32_Share -ErrorAction Stop | Select-Object -First ($cap + 1)) }
+            $shareCount = $shares.Count
+            if ($shareCount -gt $cap) { $shareCount = $cap; $truncated.Add('shares') }
+            $facts.Add([pscustomobject]@{ Fact = 'Shares'; Value = [string]$shareCount })
+        }
+        catch { $facts.Add([pscustomobject]@{ Fact = 'Shares'; Value = ('unavailable: ' + $_.Exception.Message) }) }
+        try {
+            $services = @(Get-CimInstance -ClassName Win32_Service -ErrorAction Stop | Select-Object -First ($cap + 1))
+            $serviceCount = $services.Count
+            if ($serviceCount -gt $cap) { $serviceCount = $cap; $truncated.Add('services') }
+            $facts.Add([pscustomobject]@{ Fact = 'Services'; Value = [string]$serviceCount })
+        }
+        catch { $facts.Add([pscustomobject]@{ Fact = 'Services'; Value = ('unavailable: ' + $_.Exception.Message) }) }
+        try {
+            $logons = @(Get-CimInstance -ClassName Win32_LogonSession -ErrorAction Stop |
+                Where-Object { $_.LogonType -eq 2 -or $_.LogonType -eq 10 } |
+                Select-Object -First ($cap + 1))
+            $logonCount = $logons.Count
+            if ($logonCount -gt $cap) { $logonCount = $cap; $truncated.Add('logon sessions') }
+            $facts.Add([pscustomobject]@{ Fact = 'Logon sessions'; Value = [string]$logonCount })
+        }
+        catch { $facts.Add([pscustomobject]@{ Fact = 'Logon sessions'; Value = ('unavailable: ' + $_.Exception.Message) }) }
+        $facts.Add([pscustomobject]@{ Fact = 'Collected'; Value = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') })
+        return [pscustomobject]@{
+            Facts     = @($facts.ToArray())
+            Truncated = @($truncated.ToArray())
+        }
+    }
+    $facts = @($result.Facts)
+    if ($facts.Count -eq 0) {
+        Write-ARWarn 'The host audit returned no facts.'
+        Set-ARStatus 'Host audit: no facts returned' 'Warn'
+        return
+    }
+    Show-ARText ($facts | Format-Table -AutoSize)
+    foreach ($item in @($result.Truncated)) { Write-ARWarn ('Collection capped at 2000 items: ' + [string]$item) }
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    $localFile = Join-Path (Get-ARLootDirectory 'discovery') ('host-audit-' + $safeTarget + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json')
+    $json = ConvertTo-Json -InputObject $facts -Depth 4
+    [System.IO.File]::WriteAllText($localFile, $json, [System.Text.Encoding]::UTF8)
+    Write-ARSuccess ('Host audit saved to ' + $localFile)
+    Write-ARInfo 'Read-only: no value was written on the target.'
+    Set-ARStatus 'Host audit complete' 'Ok'
+}
+
+function Invoke-ARModuleAvEnum {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'AV/EDR enumeration'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $rows = New-Object System.Collections.Generic.List[object]
+        $notes = New-Object System.Collections.Generic.List[string]
+        $truncated = New-Object System.Collections.Generic.List[string]
+        $pattern = '(?i)(windows defender|windefend|msmpeng|msmpsvc|securityhealthservice|sense\b|symantec|mcafee|trellix|sophos|crowdstrike|csfalcon|sentinelone|sentinelagent|carbonblack|cbdefense|cylance|elastic.endpoint|tanium|qualys|rapid7|fireeye|cybereason|cortex xdr|kaspersky|eset service|bitdefender|avast|avg antivirus|trend micro|fortinet|fortiedr|huntress|vectra|darktrace|malwarebytes|webroot|norton|savservice|tmccsf|mcshield|vseamps|csagent|cbstream|repmsrv|mfehidk|mfetp|eamonm|ehdrv|bdselfpr|avp|klif|klhk|emsisoft|a2start|a2guard|avira|gdata|comodo|panda|vipre|fsecure|withsecure|drweb|escan|xcitium)'
+        try {
+            $products = @(Get-CimInstance -Namespace 'root\SecurityCenter2' -ClassName AntiVirusProduct -ErrorAction Stop | Select-Object -First 32)
+            foreach ($product in $products) {
+                $state = [uint32]0
+                try { $state = [uint32]$product.productState } catch { }
+                $realTime = ((($state -shr 8) -band 0x10) -ne 0)
+                $rows.Add([pscustomobject]@{
+                    Kind   = 'Product'
+                    Name   = [string]$product.displayName
+                    State  = ('0x' + $state.ToString('X6') + ' realtime=' + [string]$realTime)
+                    Detail = [string]$product.pathToSignedProductExe
+                })
+            }
+        }
+        catch { $notes.Add('root\SecurityCenter2 is not available on this host: ' + $_.Exception.Message) }
+        $services = @(Get-CimInstance -ClassName Win32_Service -ErrorAction SilentlyContinue | Select-Object -First ($cap + 1))
+        if ($services.Count -gt $cap) { $truncated.Add('services') }
+        foreach ($service in @($services | Select-Object -First $cap)) {
+            $haystack = [string]$service.Name + ' ' + [string]$service.DisplayName + ' ' + [string]$service.PathName
+            if ($haystack -notmatch $pattern) { continue }
+            $rows.Add([pscustomobject]@{
+                Kind   = 'Service'
+                Name   = [string]$service.Name
+                State  = ([string]$service.State + ' start=' + [string]$service.StartMode + ' account=' + [string]$service.StartName)
+                Detail = [string]$service.PathName
+            })
+        }
+        $drivers = @(Get-CimInstance -ClassName Win32_SystemDriver -ErrorAction SilentlyContinue | Select-Object -First ($cap + 1))
+        if ($drivers.Count -gt $cap) { $truncated.Add('kernel drivers') }
+        foreach ($driver in @($drivers | Select-Object -First $cap)) {
+            if ([string]$driver.State -ne 'Running') { continue }
+            $haystack = [string]$driver.Name + ' ' + [string]$driver.DisplayName + ' ' + [string]$driver.PathName
+            if ($haystack -notmatch $pattern) { continue }
+            $rows.Add([pscustomobject]@{
+                Kind   = 'Driver'
+                Name   = [string]$driver.Name
+                State  = [string]$driver.State
+                Detail = [string]$driver.PathName
+            })
+        }
+        return [pscustomobject]@{
+            Rows      = @($rows.ToArray())
+            Notes     = @($notes.ToArray())
+            Truncated = @($truncated.ToArray())
+        }
+    }
+    $rows = @($result.Rows)
+    foreach ($note in @($result.Notes)) { Write-ARInfo ([string]$note) }
+    foreach ($item in @($result.Truncated)) { Write-ARWarn ('Collection capped at 2000 items: ' + [string]$item) }
+    if ($rows.Count -eq 0) {
+        Write-ARInfo 'No AV/EDR product, service or running kernel driver matched the known names.'
+        Set-ARStatus 'AV enumeration: nothing found' 'Ok'
+        return
+    }
+    Show-ARText ($rows | Sort-Object Kind, Name | Format-Table Kind, Name, State, Detail -AutoSize -Wrap)
+    Write-ARSuccess ('AV/EDR artifacts found: ' + [string]$rows.Count + '.')
+    Write-ARInfo 'Matching is name based; a renamed agent can slip past it.'
+    Write-ARInfo 'Read-only: no value was written on the target.'
+    Set-ARStatus 'AV enumeration complete' 'Ok'
+}
+
+function Invoke-ARModuleShareEnum {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'SMB share enumeration'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $rows = New-Object System.Collections.Generic.List[object]
+        $source = 'Get-SmbShare'
+        $shares = @()
+        try { $shares = @(Get-SmbShare -ErrorAction Stop | Select-Object -First ($cap + 1)) }
+        catch {
+            $source = 'Win32_Share'
+            try { $shares = @(Get-CimInstance -ClassName Win32_Share -ErrorAction Stop | Select-Object -First ($cap + 1)) }
+            catch { return [pscustomobject]@{ Rows = @(); Source = $source; Truncated = $false; Error = $_.Exception.Message } }
+        }
+        $truncated = $false
+        if ($shares.Count -gt $cap) { $shares = @($shares | Select-Object -First $cap); $truncated = $true }
+        foreach ($share in $shares) {
+            $name = [string]$share.Name
+            $accesses = @()
+            try { $accesses = @(Get-SmbShareAccess -Name $name -ErrorAction Stop | Select-Object -First 128) } catch { }
+            $accessText = New-Object System.Collections.Generic.List[string]
+            $broad = New-Object System.Collections.Generic.List[string]
+            foreach ($access in $accesses) {
+                $principal = [string]$access.AccountName
+                $right = [string]$access.AccessRight
+                $accessText.Add($principal + '=' + $right)
+                if ($right -match '(?i)^(full|change)$' -and $principal -match '(?i)^(everyone|builtin\\users|nt authority\\authenticated users|anonymous logon|builtin\\guests)$') {
+                    $broad.Add($principal + '=' + $right)
+                }
+            }
+            $rows.Add([pscustomobject]@{
+                Name            = $name
+                Path            = [string]$share.Path
+                Description     = [string]$share.Description
+                Access          = ($accessText -join '; ')
+                BroadWrite      = ($broad.Count -gt 0)
+                BroadPrincipals = ($broad -join '; ')
+            })
+        }
+        return [pscustomobject]@{
+            Rows      = @($rows.ToArray())
+            Source    = $source
+            Truncated = $truncated
+            Error     = ''
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$result.Error)) {
+        Write-ARWarn ('Share enumeration failed: ' + [string]$result.Error)
+        Set-ARStatus 'Share enumeration: failed' 'Warn'
+        return
+    }
+    $rows = @($result.Rows)
+    Write-ARInfo ('Share source: ' + [string]$result.Source)
+    if ([bool]$result.Truncated) { Write-ARWarn 'Share list capped at 2000 items.' }
+    if ($rows.Count -eq 0) {
+        Write-ARInfo 'No SMB share is exposed on the target.'
+        Set-ARStatus 'Share enumeration: nothing found' 'Ok'
+        return
+    }
+    foreach ($row in @($rows | Where-Object { $_.BroadWrite })) {
+        Write-ARWarn ('Broad principal can write: ' + [string]$row.Name + ' -> ' + [string]$row.BroadPrincipals)
+    }
+    Show-ARText ($rows | Sort-Object Name | Format-Table Name, BroadWrite, BroadPrincipals, Path -AutoSize -Wrap)
+    Show-ARText ($rows | Sort-Object Name | Format-Table Name, Access -AutoSize -Wrap)
+    Write-ARSuccess ('Shares enumerated: ' + [string]$rows.Count + '.')
+    Write-ARInfo 'Read-only: no share, ACL or value was changed on the target.'
+    Set-ARStatus 'Share enumeration complete' 'Ok'
+}
+
+function Invoke-ARModuleLocalAdmins {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Local group membership'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $rows = New-Object System.Collections.Generic.List[object]
+        $notes = New-Object System.Collections.Generic.List[string]
+        try { Add-Type -AssemblyName System.DirectoryServices.AccountManagement -ErrorAction Stop }
+        catch { return [pscustomobject]@{ Rows = @(); Notes = @('AccountManagement is not available: ' + $_.Exception.Message) } }
+        $context = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('Machine', $env:COMPUTERNAME)
+        $specs = @(
+            [pscustomobject]@{ Name = 'Administrators'; Sid = 'S-1-5-32-544' },
+            [pscustomobject]@{ Name = 'Remote Desktop Users'; Sid = 'S-1-5-32-555' }
+        )
+        foreach ($spec in $specs) {
+            $group = $null
+            try {
+                $group = [System.DirectoryServices.AccountManagement.GroupPrincipal]::FindByIdentity($context, [System.DirectoryServices.AccountManagement.IdentityType]::Sid, $spec.Sid)
+            }
+            catch { $notes.Add([string]$spec.Name + ': ' + $_.Exception.Message); continue }
+            if ($null -eq $group) { $notes.Add([string]$spec.Name + ': group not found by SID ' + [string]$spec.Sid); continue }
+            $members = @()
+            try { $members = @($group.GetMembers() | Select-Object -First ($cap + 1)) }
+            catch { $notes.Add([string]$spec.Name + ': members could not be read: ' + $_.Exception.Message); $group.Dispose(); continue }
+            if ($members.Count -gt $cap) {
+                $members = @($members | Select-Object -First $cap)
+                $notes.Add([string]$spec.Name + ': member list capped at 2000 items')
+            }
+            foreach ($member in $members) {
+                $name = ''
+                $sid = ''
+                $kind = ''
+                try { $name = [string]$member.Name } catch { }
+                try { $sid = [string]$member.Sid.Value } catch { }
+                try {
+                    $kind = [string]$member.GetType().Name
+                    if ($kind.EndsWith('Principal')) { $kind = $kind.Substring(0, $kind.Length - 9) }
+                }
+                catch { }
+                if ([string]::IsNullOrWhiteSpace($name) -and -not [string]::IsNullOrWhiteSpace($sid)) {
+                    try { $name = (New-Object System.Security.Principal.SecurityIdentifier($sid)).Translate([System.Security.Principal.NTAccount]).Value } catch { }
+                }
+                $rows.Add([pscustomobject]@{
+                    Group = [string]$spec.Name
+                    Name  = $name
+                    Sid   = $sid
+                    Kind  = $kind
+                })
+            }
+            $group.Dispose()
+        }
+        $context.Dispose()
+        return [pscustomobject]@{
+            Rows  = @($rows.ToArray())
+            Notes = @($notes.ToArray())
+        }
+    }
+    $rows = @($result.Rows)
+    foreach ($note in @($result.Notes)) { Write-ARInfo ([string]$note) }
+    if ($rows.Count -eq 0) {
+        Write-ARInfo 'No member could be read from Administrators or Remote Desktop Users.'
+        Set-ARStatus 'Local group membership: nothing found' 'Ok'
+        return
+    }
+    Show-ARText ($rows | Sort-Object Group, Name | Format-Table Group, Name, Sid, Kind -AutoSize -Wrap)
+    Write-ARSuccess ('Group members enumerated: ' + [string]$rows.Count + '.')
+    Write-ARInfo 'Read-only: group membership was not changed on the target.'
+    Set-ARStatus 'Local group membership complete' 'Ok'
+}
+
+function Invoke-ARModuleSoftwareEnum {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Installed software enumeration'
+    $session = Get-ARTargetSession
+    $remoteDirectory = Join-Path 'C:\Windows\Temp' (New-ARRemoteTempName)
+    $script:ARRemoteTempDirs.Add($remoteDirectory)
+    $remoteCsv = Join-Path $remoteDirectory 'software.csv'
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    $localCsv = Join-Path (Get-ARLootDirectory 'discovery') ('software-' + $safeTarget + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.csv')
+    try {
+        Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory -ScriptBlock {
+            param($directory)
+            if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+        } | Out-Null
+        $summary = Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory, $remoteCsv -ScriptBlock {
+            param($directory, $archive)
+            $cap = 2000
+            $keys = @(
+                'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+                'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+            )
+            $rows = New-Object System.Collections.Generic.List[object]
+            $truncated = $false
+            foreach ($key in $keys) {
+                if (-not (Test-Path -LiteralPath $key)) { continue }
+                try { $subKeys = @(Get-ChildItem -LiteralPath $key -ErrorAction Stop | Select-Object -First ($cap + 1)) }
+                catch { continue }
+                foreach ($subKey in $subKeys) {
+                    if ($rows.Count -ge $cap) { $truncated = $true; break }
+                    try { $item = Get-ItemProperty -LiteralPath $subKey.PSPath -ErrorAction Stop } catch { continue }
+                    $name = [string]$item.DisplayName
+                    if ([string]::IsNullOrWhiteSpace($name)) { continue }
+                    $rows.Add([pscustomobject]@{
+                        Name            = $name.Trim()
+                        Version         = [string]$item.DisplayVersion
+                        Publisher       = [string]$item.Publisher
+                        InstallDate     = [string]$item.InstallDate
+                        InstallLocation = [string]$item.InstallLocation
+                        UninstallString = [string]$item.UninstallString
+                        Key             = $key
+                    })
+                }
+                if ($truncated) { break }
+            }
+            if ($rows.Count -eq 0) {
+                return [pscustomobject]@{ Count = 0; Bytes = 0; Truncated = $false }
+            }
+            if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+            $rows | Export-Csv -LiteralPath $archive -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
+            return [pscustomobject]@{
+                Count     = $rows.Count
+                Bytes     = [int64](Get-Item -LiteralPath $archive -ErrorAction Stop).Length
+                Truncated = $truncated
+            }
+        }
+        if ([int]$summary.Count -eq 0) {
+            Write-ARWarn 'No installed software entry with a DisplayName was found in either Uninstall key.'
+            Set-ARStatus 'Software enumeration: nothing found' 'Warn'
+            return
+        }
+        Receive-ARFileFromTarget -RemotePath $remoteCsv -LocalPath $localCsv -Session $session | Out-Null
+        if ([bool]$summary.Truncated) { Write-ARWarn 'Software list capped at 2000 entries.' }
+        $preview = @(Import-Csv -LiteralPath $localCsv | Select-Object -First 25)
+        Show-ARText ($preview | Format-Table Name, Version, Publisher -AutoSize -Wrap)
+        Write-ARSuccess ('Installed software: ' + [string]$summary.Count + ' entries saved to ' + $localCsv)
+        Write-ARInfo 'Read-only: the registry was read and the staging CSV is removed on exit.'
+        Set-ARStatus 'Software enumeration complete' 'Ok'
+    }
+    finally {
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory -ScriptBlock {
+                param($path)
+                Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+            } | Out-Null
+        }
+        catch { }
+    }
+}
+
+function Invoke-ARModuleTaskEnum {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Scheduled task enumeration'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $rows = New-Object System.Collections.Generic.List[object]
+        $notes = New-Object System.Collections.Generic.List[string]
+        $truncated = $false
+        $source = 'Get-ScheduledTask'
+        $pattern = '(?i)\b(powershell|pwsh|cmd|wscript|cscript|mshta|rundll32|regsvr32)(\.exe)?\b'
+        $tasks = @()
+        try { $tasks = @(Get-ScheduledTask -ErrorAction Stop | Select-Object -First ($cap + 1)) }
+        catch {
+            $source = 'task XML'
+            $notes.Add('Get-ScheduledTask is not available: ' + $_.Exception.Message)
+        }
+        if ($source -eq 'Get-ScheduledTask') {
+            if ($tasks.Count -gt $cap) { $tasks = @($tasks | Select-Object -First $cap); $truncated = $true }
+            foreach ($task in $tasks) {
+                $actions = @()
+                try { $actions = @($task.Actions | Select-Object -First 20) } catch { continue }
+                foreach ($action in $actions) {
+                    $execute = [string]$action.Execute
+                    $arguments = [string]$action.Arguments
+                    if (($execute + ' ' + $arguments) -notmatch $pattern) { continue }
+                    $userId = ''
+                    try { $userId = [string]$task.Principal.UserId } catch { }
+                    $rows.Add([pscustomobject]@{
+                        Task      = ([string]$task.TaskPath + [string]$task.TaskName)
+                        Execute   = $execute
+                        Arguments = $arguments
+                        User      = $userId
+                        State     = [string]$task.State
+                    })
+                }
+                if ($rows.Count -ge $cap) { $truncated = $true; break }
+            }
+        }
+        else {
+            $tasksRoot = Join-Path $env:SystemRoot 'System32\Tasks'
+            $files = @()
+            try { $files = @(Get-ChildItem -LiteralPath $tasksRoot -Recurse -File -ErrorAction Stop | Select-Object -First ($cap + 1)) }
+            catch { $notes.Add('Task folder could not be read: ' + $_.Exception.Message) }
+            if ($files.Count -gt $cap) { $files = @($files | Select-Object -First $cap); $truncated = $true }
+            foreach ($file in $files) {
+                if ($rows.Count -ge $cap) { $truncated = $true; break }
+                $document = New-Object System.Xml.XmlDocument
+                $document.XmlResolver = $null
+                try { $document.Load($file.FullName) } catch { continue }
+                $execNodes = @($document.SelectNodes('//*[local-name()="Exec"]') | Select-Object -First 20)
+                $userNode = $document.SelectSingleNode('//*[local-name()="UserId"]')
+                $userId = ''
+                if ($null -ne $userNode) { $userId = [string]$userNode.InnerText }
+                foreach ($execNode in $execNodes) {
+                    $commandNode = $execNode.SelectSingleNode('*[local-name()="Command"]')
+                    $argumentsNode = $execNode.SelectSingleNode('*[local-name()="Arguments"]')
+                    $execute = ''
+                    $arguments = ''
+                    if ($null -ne $commandNode) { $execute = [string]$commandNode.InnerText }
+                    if ($null -ne $argumentsNode) { $arguments = [string]$argumentsNode.InnerText }
+                    if (($execute + ' ' + $arguments) -notmatch $pattern) { continue }
+                    $taskName = $file.FullName
+                    if ($taskName.StartsWith($tasksRoot)) { $taskName = $taskName.Substring($tasksRoot.Length).TrimStart('\') }
+                    $rows.Add([pscustomobject]@{
+                        Task      = $taskName
+                        Execute   = $execute
+                        Arguments = $arguments
+                        User      = $userId
+                        State     = 'unknown'
+                    })
+                }
+            }
+        }
+        return [pscustomobject]@{
+            Rows      = @($rows.ToArray())
+            Source    = $source
+            Notes     = @($notes.ToArray())
+            Truncated = $truncated
+        }
+    }
+    $rows = @($result.Rows)
+    Write-ARInfo ('Task source: ' + [string]$result.Source)
+    foreach ($note in @($result.Notes)) { Write-ARInfo ([string]$note) }
+    if ([bool]$result.Truncated) { Write-ARWarn 'Task scan capped at 2000 tasks.' }
+    if ($rows.Count -eq 0) {
+        Write-ARInfo 'No scheduled task action calls powershell, cmd, wscript, cscript, mshta, rundll32 or regsvr32.'
+        Set-ARStatus 'Scheduled task enumeration: nothing found' 'Ok'
+        return
+    }
+    $preview = @($rows | Sort-Object Task | Select-Object -First 200)
+    Show-ARText ($preview | Format-Table Task, Execute, Arguments, User, State -AutoSize -Wrap)
+    if ($rows.Count -gt $preview.Count) { Write-ARInfo ('Only the first 200 of ' + [string]$rows.Count + ' matching tasks are printed.') }
+    Write-ARSuccess ('Matching scheduled tasks: ' + [string]$rows.Count + '.')
+    Write-ARInfo 'Read-only: tasks were queried, never started or modified.'
+    Set-ARStatus 'Scheduled task enumeration complete' 'Ok'
+}
+
+function Invoke-ARModuleServiceEnum {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Service enumeration'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $directoryCap = 300
+        $rows = New-Object System.Collections.Generic.List[object]
+        $truncated = New-Object System.Collections.Generic.List[string]
+        function Get-ARServiceExePath {
+            param([string]$CommandLine)
+            if ([string]::IsNullOrWhiteSpace($CommandLine)) { return '' }
+            $text = $CommandLine.Trim()
+            if ($text.StartsWith('"')) {
+                $end = $text.IndexOf('"', 1)
+                if ($end -gt 1) { return $text.Substring(1, $end - 1) }
+                return ''
+            }
+            $match = [regex]::Match($text, '^(.+?\.exe)(\s|$)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if ($match.Success) { return $match.Groups[1].Value }
+            return ($text -split '\s+')[0]
+        }
+        function Get-ARServiceDirectory {
+            param([string]$Path)
+            if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+            $expanded = [Environment]::ExpandEnvironmentVariables($Path)
+            if ($expanded.StartsWith('\??\')) { $expanded = $expanded.Substring(4) }
+            if ($expanded.StartsWith('\SystemRoot\')) { $expanded = $env:SystemRoot + '\' + $expanded.Substring(12) }
+            try { return [System.IO.Path]::GetDirectoryName($expanded) } catch { return '' }
+        }
+        $services = @(Get-CimInstance -ClassName Win32_Service -ErrorAction Stop | Select-Object -First ($cap + 1))
+        if ($services.Count -gt $cap) { $services = @($services | Select-Object -First $cap); $truncated.Add('services') }
+        $exeCache = @{}
+        $writableCache = @{}
+        $directoriesChecked = 0
+        $directoriesTruncated = $false
+        foreach ($service in $services) {
+            $pathName = [string]$service.PathName
+            $exe = ''
+            if (-not [string]::IsNullOrWhiteSpace($pathName)) {
+                if ($exeCache.ContainsKey($pathName)) { $exe = [string]$exeCache[$pathName] }
+                else {
+                    $exe = Get-ARServiceExePath -CommandLine $pathName
+                    $exeCache[$pathName] = $exe
+                }
+            }
+            $unquoted = $false
+            if (-not [string]::IsNullOrWhiteSpace($pathName) -and -not $pathName.TrimStart().StartsWith('"') -and $pathName -match '\s') {
+                if ($pathName -notmatch '^(?i)[^\s]+\.exe(\s|$)') { $unquoted = $true }
+            }
+            $directory = ''
+            $writableDirectory = $false
+            if (-not [string]::IsNullOrWhiteSpace($exe)) {
+                $directory = Get-ARServiceDirectory -Path $exe
+                if (-not [string]::IsNullOrWhiteSpace($directory)) {
+                    if ($writableCache.ContainsKey($directory)) { $writableDirectory = [bool]$writableCache[$directory] }
+                    elseif ($directoriesChecked -lt $directoryCap) {
+                        $directoriesChecked++
+                        $isWritable = $false
+                        try {
+                            $acl = Get-Acl -LiteralPath $directory -ErrorAction Stop
+                            foreach ($rule in @($acl.Access | Select-Object -First 512)) {
+                                if ($rule.AccessControlType -ne 'Allow') { continue }
+                                $identity = [string]$rule.IdentityReference
+                                if ($identity -notmatch '(?i)^(Everyone|BUILTIN\\Users|NT AUTHORITY\\Authenticated Users|S-1-1-0|S-1-5-32-545|S-1-5-11)$') { continue }
+                                if ([string]$rule.FileSystemRights -match '(?i)(Write|Modify|FullControl|CreateFiles|AppendData)') { $isWritable = $true; break }
+                            }
+                        }
+                        catch { }
+                        if (-not $isWritable) {
+                            # A failed ACL read (C:\Windows\Temp returns access denied even for admins on some builds) must not hide a classically writable directory.
+                            $normalized = $directory.TrimEnd('\')
+                            foreach ($known in @(
+                                    ($env:SystemRoot + '\Temp'),
+                                    ($env:SystemDrive + '\Temp'),
+                                    ($env:SystemDrive + '\Users\Public'))) {
+                                if ($normalized -eq $known) { $isWritable = $true; break }
+                            }
+                        }
+                        $writableCache[$directory] = $isWritable
+                        $writableDirectory = $isWritable
+                    }
+                    else { $directoriesTruncated = $true }
+                }
+            }
+            $rows.Add([pscustomobject]@{
+                Name          = [string]$service.Name
+                State         = [string]$service.State
+                StartMode     = [string]$service.StartMode
+                Account       = [string]$service.StartName
+                Path          = $pathName
+                Unquoted      = $unquoted
+                WritableDir   = $writableDirectory
+                Directory     = $directory
+            })
+        }
+        if ($directoriesTruncated) { $truncated.Add('directory ACL checks (first 300 unique directories only)') }
+        return [pscustomobject]@{
+            Rows      = @($rows.ToArray())
+            Truncated = @($truncated.ToArray())
+        }
+    }
+    $rows = @($result.Rows)
+    foreach ($item in @($result.Truncated)) { Write-ARWarn ('Collection capped: ' + [string]$item) }
+    if ($rows.Count -eq 0) {
+        Write-ARInfo 'The service table returned no entries.'
+        Set-ARStatus 'Service enumeration: nothing found' 'Ok'
+        return
+    }
+    $unquotedRows = @($rows | Where-Object { $_.Unquoted })
+    $writableRows = @($rows | Where-Object { $_.WritableDir })
+    foreach ($row in @($unquotedRows | Select-Object -First 200)) {
+        Write-ARWarn ('Unquoted service path: ' + [string]$row.Name + ' -> ' + [string]$row.Path)
+    }
+    foreach ($row in @($writableRows | Select-Object -First 200)) {
+        Write-ARWarn ('Service directory allows broad writes: ' + [string]$row.Name + ' -> ' + [string]$row.Directory)
+    }
+    Write-ARInfo ('Services: ' + [string]$rows.Count + '; unquoted paths: ' + [string]$unquotedRows.Count + '; writable directories: ' + [string]$writableRows.Count + '.')
+    $flagged = @($rows | Where-Object { $_.Unquoted -or $_.WritableDir } | Sort-Object Name)
+    if ($flagged.Count -gt 0) {
+        Show-ARText ($flagged | Format-Table Name, State, StartMode, Account, Unquoted, WritableDir, Path -AutoSize -Wrap)
+    }
+    $plain = @($rows | Where-Object { -not $_.Unquoted -and -not $_.WritableDir } | Sort-Object Name)
+    if ($plain.Count -gt 0) {
+        $preview = @($plain | Select-Object -First 40)
+        Show-ARText ($preview | Format-Table Name, State, StartMode, Account, Path -AutoSize -Wrap)
+        if ($plain.Count -gt $preview.Count) { Write-ARInfo ('Only the first 40 of ' + [string]$plain.Count + ' unremarkable services are printed.') }
+    }
+    Write-ARInfo 'Read-only: service configuration was queried, never modified.'
+    Set-ARStatus 'Service enumeration complete' 'Ok'
+}
+
+function Invoke-ARModuleAutoruns {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Autorun enumeration'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $rows = New-Object System.Collections.Generic.List[object]
+        $truncated = New-Object System.Collections.Generic.List[string]
+        $runKeys = @(
+            @('HKLM', 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run'),
+            @('HKLM', 'SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'),
+            @('HKLM', 'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'),
+            @('HKLM', 'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce'),
+            @('HKCU', 'Software\Microsoft\Windows\CurrentVersion\Run'),
+            @('HKCU', 'Software\Microsoft\Windows\CurrentVersion\RunOnce')
+        )
+        foreach ($pair in $runKeys) {
+            if ($rows.Count -ge $cap) { $truncated.Add('autorun entries'); break }
+            $location = $pair[0] + '\' + $pair[1]
+            $key = $null
+            try { $key = Get-Item -LiteralPath ($pair[0] + ':\' + $pair[1]) -ErrorAction Stop } catch { continue }
+            foreach ($valueName in @($key.GetValueNames() | Select-Object -First ($cap + 1))) {
+                if ($rows.Count -ge $cap) { $truncated.Add('autorun entries'); break }
+                $value = ''
+                try { $value = [string]$key.GetValue($valueName, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } catch { }
+                $rows.Add([pscustomobject]@{ Type = 'Run'; Location = $location; Name = [string]$valueName; Value = $value })
+            }
+            $key.Close()
+        }
+        $profileList = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+        $sidNames = @{}
+        try {
+            foreach ($profileKey in @(Get-ChildItem -LiteralPath $profileList -ErrorAction Stop | Select-Object -First 64)) {
+                $sid = $profileKey.PSChildName
+                $profilePath = ''
+                try { $profilePath = [string](Get-ItemProperty -LiteralPath $profileKey.PSPath -Name 'ProfileImagePath' -ErrorAction Stop).ProfileImagePath } catch { }
+                if (-not [string]::IsNullOrWhiteSpace($profilePath)) { $sidNames[$sid] = Split-Path -Leaf $profilePath }
+            }
+        }
+        catch { }
+        $usersRoot = [Microsoft.Win32.Registry]::Users
+        foreach ($sid in @($usersRoot.GetSubKeyNames() | Select-Object -First 64)) {
+            if ($rows.Count -ge $cap) { $truncated.Add('per-user autorun entries'); break }
+            $label = $sid
+            if ($sidNames.ContainsKey($sid)) { $label = [string]$sidNames[$sid] + ' (' + $sid + ')' }
+            foreach ($subName in @('Run', 'RunOnce')) {
+                $key = $null
+                try { $key = $usersRoot.OpenSubKey($sid + '\Software\Microsoft\Windows\CurrentVersion\' + $subName) } catch { continue }
+                if ($null -eq $key) { continue }
+                foreach ($valueName in @($key.GetValueNames() | Select-Object -First ($cap + 1))) {
+                    if ($rows.Count -ge $cap) { $truncated.Add('per-user autorun entries'); break }
+                    $value = ''
+                    try { $value = [string]$key.GetValue($valueName, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } catch { }
+                    $rows.Add([pscustomobject]@{
+                        Type     = 'Run'
+                        Location = ('HKU\' + $label + '\Software\Microsoft\Windows\CurrentVersion\' + $subName)
+                        Name     = [string]$valueName
+                        Value    = $value
+                    })
+                }
+                $key.Close()
+            }
+        }
+        $startupDirs = New-Object System.Collections.Generic.List[string]
+        try { $startupDirs.Add([Environment]::GetFolderPath('CommonStartup')) } catch { }
+        try { $startupDirs.Add([Environment]::GetFolderPath('Startup')) } catch { }
+        try {
+            foreach ($profileRoot in @(Get-ChildItem -LiteralPath (Join-Path $env:SystemDrive 'Users') -Directory -ErrorAction SilentlyContinue | Select-Object -First 64)) {
+                $startupDirs.Add((Join-Path $profileRoot.FullName 'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'))
+            }
+        }
+        catch { }
+        foreach ($startupDir in @($startupDirs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+            if ($rows.Count -ge $cap) { $truncated.Add('startup folder entries'); break }
+            if (-not (Test-Path -LiteralPath $startupDir)) { continue }
+            foreach ($file in @(Get-ChildItem -LiteralPath $startupDir -File -ErrorAction SilentlyContinue | Select-Object -First 200)) {
+                if ($rows.Count -ge $cap) { $truncated.Add('startup folder entries'); break }
+                $rows.Add([pscustomobject]@{ Type = 'Startup'; Location = $startupDir; Name = $file.Name; Value = $file.FullName })
+            }
+        }
+        $subscriptionClasses = @(
+            @('__EventFilter', 'WmiFilter'),
+            @('CommandLineEventConsumer', 'WmiConsumer'),
+            @('ActiveScriptEventConsumer', 'WmiConsumer'),
+            @('__FilterToConsumerBinding', 'WmiBinding')
+        )
+        foreach ($classPair in $subscriptionClasses) {
+            if ($rows.Count -ge $cap) { $truncated.Add('WMI subscription entries'); break }
+            $items = @()
+            try { $items = @(Get-WmiObject -Namespace 'root\subscription' -Class $classPair[0] -ErrorAction Stop | Select-Object -First ($cap + 1)) }
+            catch { continue }
+            foreach ($item in $items) {
+                if ($rows.Count -ge $cap) { $truncated.Add('WMI subscription entries'); break }
+                $detail = ''
+                if ($classPair[0] -eq '__EventFilter') { $detail = [string]$item.Query }
+                elseif ($classPair[0] -eq 'CommandLineEventConsumer') { $detail = [string]$item.CommandLineTemplate }
+                elseif ($classPair[0] -eq 'ActiveScriptEventConsumer') { $detail = [string]$item.ScriptText }
+                else { $detail = [string]$item.Filter + ' -> ' + [string]$item.Consumer }
+                if ($detail.Length -gt 500) { $detail = $detail.Substring(0, 500) + '...' }
+                $rows.Add([pscustomobject]@{
+                    Type     = [string]$classPair[1]
+                    Location = ('root\subscription:' + [string]$classPair[0])
+                    Name     = [string]$item.Name
+                    Value    = $detail
+                })
+            }
+        }
+        foreach ($winlogonKey in @(
+                'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon',
+                'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Winlogon')) {
+            foreach ($valueName in @('Shell', 'Userinit')) {
+                if ($rows.Count -ge $cap) { $truncated.Add('Winlogon entries'); break }
+                try {
+                    $value = [string](Get-ItemProperty -LiteralPath $winlogonKey -Name $valueName -ErrorAction Stop).$valueName
+                    $rows.Add([pscustomobject]@{ Type = 'Winlogon'; Location = $winlogonKey; Name = $valueName; Value = $value })
+                }
+                catch { }
+            }
+        }
+        return [pscustomobject]@{
+            Rows      = @($rows.ToArray())
+            Truncated = @($truncated.ToArray())
+        }
+    }
+    $rows = @($result.Rows)
+    foreach ($item in @($result.Truncated)) { Write-ARWarn ('Collection capped at 2000 items: ' + [string]$item) }
+    if ($rows.Count -eq 0) {
+        Write-ARInfo 'No autorun entry was found in the Run keys, Startup folders, WMI subscriptions or Winlogon.'
+        Set-ARStatus 'Autorun enumeration: nothing found' 'Ok'
+        return
+    }
+    $preview = @($rows | Sort-Object Type, Location, Name | Select-Object -First 200)
+    Show-ARText ($preview | Format-Table Type, Location, Name, Value -AutoSize -Wrap)
+    if ($rows.Count -gt $preview.Count) { Write-ARInfo ('Only the first 200 of ' + [string]$rows.Count + ' autorun entries are printed.') }
+    Write-ARSuccess ('Autorun entries found: ' + [string]$rows.Count + '.')
+    Write-ARInfo 'Read-only: registry keys, folders and WMI subscriptions were only read.'
+    Set-ARStatus 'Autorun enumeration complete' 'Ok'
+}
+
+function Invoke-ARModuleDomainInfo {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Domain information'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $computer = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        $partOfDomain = [bool]$computer.PartOfDomain
+        $domain = [string]$computer.Domain
+        if (-not $partOfDomain) {
+            return [pscustomobject]@{ Joined = $false; Domain = $domain; Sections = @() }
+        }
+        $sections = New-Object System.Collections.Generic.List[object]
+        $specs = @(
+            [pscustomobject]@{ Label = 'net accounts'; File = 'net.exe'; Arguments = @('accounts') },
+            [pscustomobject]@{ Label = 'net group "Domain Admins" /domain'; File = 'net.exe'; Arguments = @('group', 'Domain Admins', '/domain') }
+        )
+        $safeDomain = ($domain -match '^[A-Za-z0-9][A-Za-z0-9.-]{0,254}$')
+        if ($safeDomain) {
+            $specs += [pscustomobject]@{ Label = ('nltest /dsgetdc:' + $domain); File = 'nltest.exe'; Arguments = @('/dsgetdc:' + $domain) }
+        }
+        foreach ($spec in $specs) {
+            $lines = @()
+            $exitCode = -1
+            try {
+                $arguments = @($spec.Arguments)
+                $lines = @(& $spec.File @arguments 2>&1 | ForEach-Object { [string]$_ } | Select-Object -First ($cap + 1))
+                $exitCode = [int]$LASTEXITCODE
+            }
+            catch {
+                $lines = @($_.Exception.Message)
+                $exitCode = -1
+            }
+            $lineTruncated = $false
+            if ($lines.Count -gt $cap) { $lines = @($lines | Select-Object -First $cap); $lineTruncated = $true }
+            $sections.Add([pscustomobject]@{
+                Command   = [string]$spec.Label
+                ExitCode  = $exitCode
+                Output    = ($lines -join "`r`n")
+                Truncated = $lineTruncated
+            })
+        }
+        if (-not $safeDomain) {
+            $sections.Add([pscustomobject]@{
+                Command   = 'nltest /dsgetdc'
+                ExitCode  = -1
+                Output    = 'The domain name contains characters outside [A-Za-z0-9.-]; nltest was not invoked.'
+                Truncated = $false
+            })
+        }
+        return [pscustomobject]@{
+            Joined   = $true
+            Domain   = $domain
+            Sections = @($sections.ToArray())
+        }
+    }
+    if (-not [bool]$result.Joined) {
+        Write-ARInfo ('Host is not domain joined: workgroup ' + [string]$result.Domain + '. No domain query was run.')
+        Set-ARStatus 'Domain info: host is not domain joined' 'Ok'
+        return
+    }
+    Write-ARInfo ('Domain: ' + [string]$result.Domain)
+    foreach ($section in @($result.Sections)) {
+        Write-Host ('--- ' + [string]$section.Command + ' (exit ' + [string]$section.ExitCode + ') ---') -ForegroundColor DarkGray
+        if ([string]::IsNullOrWhiteSpace([string]$section.Output)) { Write-Host '(no output)' -ForegroundColor Gray }
+        else { Write-Host ([string]$section.Output) -ForegroundColor Gray }
+        if ([bool]$section.Truncated) { Write-ARWarn ('Output of ' + [string]$section.Command + ' capped at 2000 lines.') }
+    }
+    Write-ARInfo 'Read-only: domain queries do not change accounts, groups or the host.'
+    Set-ARStatus 'Domain information complete' 'Ok'
+}
+
+function Invoke-ARModuleNetworkConfig {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Network configuration'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $adapters = New-Object System.Collections.Generic.List[object]
+        $routes = New-Object System.Collections.Generic.List[object]
+        $proxies = New-Object System.Collections.Generic.List[object]
+        $truncated = New-Object System.Collections.Generic.List[string]
+        $adapterRows = @(Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction SilentlyContinue | Select-Object -First ($cap + 1))
+        if ($adapterRows.Count -gt $cap) { $truncated.Add('adapters'); $adapterRows = @($adapterRows | Select-Object -First $cap) }
+        foreach ($adapter in $adapterRows) {
+            $adapters.Add([pscustomobject]@{
+                Name    = [string]$adapter.Description
+                IP      = (@($adapter.IPAddress) -join ', ')
+                Subnet  = (@($adapter.IPSubnet) -join ', ')
+                Gateway = (@($adapter.DefaultIPGateway) -join ', ')
+                DNS     = (@($adapter.DNSServerSearchOrder) -join ', ')
+                MAC     = [string]$adapter.MACAddress
+                DHCP    = [string]$adapter.DHCPEnabled
+            })
+        }
+        $routeRows = @(Get-CimInstance -ClassName Win32_IP4RouteTable -ErrorAction SilentlyContinue | Select-Object -First ($cap + 1))
+        if ($routeRows.Count -gt $cap) { $truncated.Add('routes'); $routeRows = @($routeRows | Select-Object -First $cap) }
+        foreach ($route in $routeRows) {
+            $routes.Add([pscustomobject]@{
+                Destination = [string]$route.Destination
+                Mask        = [string]$route.Mask
+                NextHop     = [string]$route.NextHop
+                Metric      = [string]$route.Metric1
+                Interface   = [string]$route.InterfaceIndex
+            })
+        }
+        $proxyKeys = @(
+            [pscustomobject]@{ Scope = 'HKCU'; Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' },
+            [pscustomobject]@{ Scope = 'HKLM'; Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings' }
+        )
+        foreach ($proxyKey in $proxyKeys) {
+            try {
+                $item = Get-ItemProperty -LiteralPath $proxyKey.Path -ErrorAction Stop
+                $proxies.Add([pscustomobject]@{
+                    Scope          = [string]$proxyKey.Scope
+                    ProxyEnable    = [string]$item.ProxyEnable
+                    ProxyServer    = [string]$item.ProxyServer
+                    ProxyOverride  = [string]$item.ProxyOverride
+                    AutoConfigURL  = [string]$item.AutoConfigURL
+                })
+            }
+            catch { }
+        }
+        $usersRoot = [Microsoft.Win32.Registry]::Users
+        foreach ($sid in @($usersRoot.GetSubKeyNames() | Select-Object -First 64)) {
+            $key = $null
+            try { $key = $usersRoot.OpenSubKey($sid + '\Software\Microsoft\Windows\CurrentVersion\Internet Settings') } catch { continue }
+            if ($null -eq $key) { continue }
+            $proxies.Add([pscustomobject]@{
+                Scope         = ('HKU\' + $sid)
+                ProxyEnable   = [string]$key.GetValue('ProxyEnable', '')
+                ProxyServer   = [string]$key.GetValue('ProxyServer', '')
+                ProxyOverride = [string]$key.GetValue('ProxyOverride', '')
+                AutoConfigURL = [string]$key.GetValue('AutoConfigURL', '')
+            })
+            $key.Close()
+        }
+        $winHttp = ''
+        try { $winHttp = ((& netsh.exe winhttp show proxy 2>&1 | ForEach-Object { [string]$_ } | Select-Object -First 64) -join "`r`n") }
+        catch { $winHttp = $_.Exception.Message }
+        return [pscustomobject]@{
+            Adapters  = @($adapters.ToArray())
+            Routes    = @($routes.ToArray())
+            Proxies   = @($proxies.ToArray())
+            WinHttp   = $winHttp
+            Truncated = @($truncated.ToArray())
+        }
+    }
+    foreach ($item in @($result.Truncated)) { Write-ARWarn ('Collection capped at 2000 items: ' + [string]$item) }
+    $adapters = @($result.Adapters)
+    if ($adapters.Count -gt 0) {
+        Show-ARText ($adapters | Format-Table Name, IP, Gateway, DNS, MAC, DHCP -AutoSize -Wrap)
+    }
+    else { Write-ARInfo 'No IP-enabled adapter was returned.' }
+    $routes = @($result.Routes)
+    if ($routes.Count -gt 0) {
+        $preview = @($routes | Select-Object -First 100)
+        Show-ARText ($preview | Format-Table Destination, Mask, NextHop, Metric, Interface -AutoSize)
+        if ($routes.Count -gt $preview.Count) { Write-ARInfo ('Only the first 100 of ' + [string]$routes.Count + ' IPv4 routes are printed.') }
+    }
+    $proxies = @($result.Proxies)
+    if ($proxies.Count -gt 0) {
+        Show-ARText ($proxies | Format-Table Scope, ProxyEnable, ProxyServer, AutoConfigURL -AutoSize -Wrap)
+    }
+    else { Write-ARInfo 'No WinINET proxy key was readable.' }
+    Write-Host '--- netsh winhttp show proxy ---' -ForegroundColor DarkGray
+    if ([string]::IsNullOrWhiteSpace([string]$result.WinHttp)) { Write-Host '(no output)' -ForegroundColor Gray }
+    else { Write-Host ([string]$result.WinHttp) -ForegroundColor Gray }
+    Write-ARSuccess ('Network configuration: ' + [string]$adapters.Count + ' adapters, ' + [string]$routes.Count + ' routes, ' + [string]$proxies.Count + ' proxy entries.')
+    Write-ARInfo 'Read-only: adapter, route and proxy settings were only read.'
+    Set-ARStatus 'Network configuration complete' 'Ok'
+}
+
+function Invoke-ARModuleArpTable {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'ARP and connection enumeration'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $neighbors = New-Object System.Collections.Generic.List[object]
+        $connections = New-Object System.Collections.Generic.List[object]
+        $truncated = New-Object System.Collections.Generic.List[string]
+        $neighborSource = 'Get-NetNeighbor'
+        $neighborRows = @()
+        try {
+            $neighborRows = @(Get-NetNeighbor -AddressFamily IPv4 -ErrorAction Stop | Where-Object { [string]$_.State -ne 'Unreachable' } | Select-Object -First ($cap + 1))
+        }
+        catch {
+            $neighborSource = 'arp'
+            $lines = @(& arp.exe -a 2>&1 | ForEach-Object { [string]$_ } | Select-Object -First ($cap + 1))
+            if ($lines.Count -gt $cap) { $truncated.Add('ARP neighbours') }
+            foreach ($line in @($lines | Select-Object -First $cap)) {
+                $match = [regex]::Match($line, '^\s*(\d{1,3}(?:\.\d{1,3}){3})\s+([0-9a-fA-F-]{17})\s+(\S+)')
+                if (-not $match.Success) { continue }
+                $ip = $match.Groups[1].Value
+                if ($ip -eq '255.255.255.255' -or $ip -eq '0.0.0.0') { continue }
+                if ($ip -match '^(22[4-9]|23[0-9])\.') { continue }
+                $neighbors.Add([pscustomobject]@{ IP = $ip; MAC = $match.Groups[2].Value; State = $match.Groups[3].Value; Interface = ''; Source = 'arp' })
+            }
+        }
+        if ($neighborSource -eq 'Get-NetNeighbor') {
+            if ($neighborRows.Count -gt $cap) { $neighborRows = @($neighborRows | Select-Object -First $cap); $truncated.Add('ARP neighbours') }
+            foreach ($neighbor in $neighborRows) {
+                $ip = [string]$neighbor.IPAddress
+                if ($ip -eq '255.255.255.255' -or $ip -eq '0.0.0.0') { continue }
+                if ($ip -match '^(22[4-9]|23[0-9])\.') { continue }
+                $neighbors.Add([pscustomobject]@{
+                    IP        = $ip
+                    MAC       = [string]$neighbor.LinkLayerAddress
+                    State     = [string]$neighbor.State
+                    Interface = [string]$neighbor.InterfaceAlias
+                    Source    = $neighborSource
+                })
+            }
+        }
+        $tcpSource = 'Get-NetTCPConnection'
+        $tcpRows = @()
+        try {
+            $tcpRows = @(Get-NetTCPConnection -State Established -ErrorAction Stop | Select-Object -First ($cap + 1))
+        }
+        catch {
+            $tcpSource = 'netstat'
+            $lines = @(& netstat.exe -ano 2>&1 | ForEach-Object { [string]$_ } | Select-Object -First ($cap + 1))
+            if ($lines.Count -gt $cap) { $truncated.Add('TCP connections') }
+            foreach ($line in @($lines | Select-Object -First $cap)) {
+                $fields = @($line.Trim() -split '\s+')
+                if ($fields.Count -lt 5) { continue }
+                if ($fields[0] -ne 'TCP') { continue }
+                if ($fields[3] -ne 'ESTABLISHED') { continue }
+                $localAddress = ''
+                $localPort = 0
+                $remoteAddress = ''
+                $remotePort = 0
+                $localText = [string]$fields[1]
+                $remoteText = [string]$fields[2]
+                $localSplit = $localText.LastIndexOf(':')
+                $remoteSplit = $remoteText.LastIndexOf(':')
+                if ($localSplit -gt 0) {
+                    $localAddress = $localText.Substring(0, $localSplit)
+                    [int]::TryParse($localText.Substring($localSplit + 1), [ref]$localPort) | Out-Null
+                }
+                if ($remoteSplit -gt 0) {
+                    $remoteAddress = $remoteText.Substring(0, $remoteSplit)
+                    [int]::TryParse($remoteText.Substring($remoteSplit + 1), [ref]$remotePort) | Out-Null
+                }
+                $processId = 0
+                [int]::TryParse([string]$fields[4], [ref]$processId) | Out-Null
+                $connections.Add([pscustomobject]@{
+                    LocalAddress  = $localAddress
+                    LocalPort     = $localPort
+                    RemoteAddress = $remoteAddress
+                    RemotePort    = $remotePort
+                    Pid           = $processId
+                    Process       = ''
+                    Scope         = ''
+                })
+            }
+        }
+        if ($tcpSource -eq 'Get-NetTCPConnection') {
+            if ($tcpRows.Count -gt $cap) { $tcpRows = @($tcpRows | Select-Object -First $cap); $truncated.Add('TCP connections') }
+            foreach ($connection in $tcpRows) {
+                $connections.Add([pscustomobject]@{
+                    LocalAddress  = [string]$connection.LocalAddress
+                    LocalPort     = [int]$connection.LocalPort
+                    RemoteAddress = [string]$connection.RemoteAddress
+                    RemotePort    = [int]$connection.RemotePort
+                    Pid           = [int]$connection.OwningProcess
+                    Process       = ''
+                    Scope         = ''
+                })
+            }
+        }
+        $processNames = @{}
+        try {
+            foreach ($process in @(Get-Process -ErrorAction SilentlyContinue | Select-Object -First $cap)) {
+                $processNames[[int]$process.Id] = [string]$process.ProcessName
+            }
+        }
+        catch { }
+        foreach ($connection in $connections) {
+            if ($processNames.ContainsKey([int]$connection.Pid)) { $connection.Process = [string]$processNames[[int]$connection.Pid] }
+            $remoteAddress = [string]$connection.RemoteAddress
+            if ($remoteAddress -eq '127.0.0.1' -or $remoteAddress -eq '::1') { $connection.Scope = 'Loopback' }
+            elseif ($remoteAddress -match '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|fc|fd)') { $connection.Scope = 'Private' }
+            elseif ($remoteAddress -match '^(169\.254\.|fe80:)') { $connection.Scope = 'LinkLocal' }
+            elseif ($remoteAddress -eq '' -or $remoteAddress -eq '0.0.0.0' -or $remoteAddress -eq '::') { $connection.Scope = 'Unspecified' }
+            else { $connection.Scope = 'Public' }
+        }
+        return [pscustomobject]@{
+            Neighbors      = @($neighbors.ToArray())
+            Connections    = @($connections.ToArray())
+            NeighborSource = $neighborSource
+            TcpSource      = $tcpSource
+            Truncated      = @($truncated.ToArray())
+        }
+    }
+    foreach ($item in @($result.Truncated)) { Write-ARWarn ('Collection capped at 2000 items: ' + [string]$item) }
+    $neighbors = @($result.Neighbors)
+    Write-ARInfo ('ARP source: ' + [string]$result.NeighborSource + '; TCP source: ' + [string]$result.TcpSource)
+    if ($neighbors.Count -gt 0) {
+        Show-ARText ($neighbors | Sort-Object IP | Format-Table IP, MAC, State, Interface -AutoSize)
+    }
+    else { Write-ARInfo 'The ARP table is empty or could not be read.' }
+    $connections = @($result.Connections)
+    if ($connections.Count -eq 0) {
+        Write-ARInfo 'No established TCP connection was found.'
+        Set-ARStatus 'ARP and connection enumeration: nothing found' 'Ok'
+        return
+    }
+    $private = @($connections | Where-Object { $_.Scope -eq 'Private' })
+    if ($private.Count -gt 0) {
+        Write-ARWarn ('Established connections into private address space (lateral candidates): ' + [string]$private.Count + '.')
+        Show-ARText ($private | Sort-Object RemoteAddress, RemotePort | Format-Table RemoteAddress, RemotePort, Process, Pid, LocalAddress, LocalPort -AutoSize)
+    }
+    $others = @($connections | Where-Object { $_.Scope -ne 'Private' } | Select-Object -First 100)
+    if ($others.Count -gt 0) {
+        Show-ARText ($others | Sort-Object Scope, RemoteAddress | Format-Table RemoteAddress, RemotePort, Process, Pid, Scope -AutoSize)
+    }
+    Write-ARSuccess ('Established TCP connections: ' + [string]$connections.Count + '; ARP neighbours: ' + [string]$neighbors.Count + '.')
+    Write-ARInfo 'Read-only: the ARP cache and connection table were only read.'
+    Set-ARStatus 'ARP and connection enumeration complete' 'Ok'
+}
+
+function Invoke-ARModuleSmbAudit {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'SMB posture audit'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $values = New-Object System.Collections.Generic.List[object]
+        $notes = New-Object System.Collections.Generic.List[string]
+        $serverConfig = $null
+        $clientConfig = $null
+        try { $serverConfig = Get-SmbServerConfiguration -ErrorAction Stop }
+        catch { $notes.Add('Get-SmbServerConfiguration: ' + $_.Exception.Message) }
+        try { $clientConfig = Get-SmbClientConfiguration -ErrorAction Stop }
+        catch { $notes.Add('Get-SmbClientConfiguration: ' + $_.Exception.Message) }
+        if ($null -ne $serverConfig) {
+            foreach ($name in @('EnableSMB1Protocol', 'RequireSecuritySignature', 'EnableSecuritySignature', 'RestrictNullSessAccess', 'EnableGuestAccess', 'NullSessionShares', 'NullSessionPipes')) {
+                $property = $serverConfig.PSObject.Properties[$name]
+                if ($null -eq $property) { continue }
+                $value = $property.Value
+                if ($value -is [array]) { $value = ($value -join ', ') }
+                $values.Add([pscustomobject]@{ Scope = 'SmbServerConfiguration'; Name = $name; Value = [string]$value })
+            }
+        }
+        if ($null -ne $clientConfig) {
+            foreach ($name in @('RequireSecuritySignature', 'EnableSecuritySignature')) {
+                $property = $clientConfig.PSObject.Properties[$name]
+                if ($null -eq $property) { continue }
+                $values.Add([pscustomobject]@{ Scope = 'SmbClientConfiguration'; Name = $name; Value = [string]$property.Value })
+            }
+        }
+        $serverParams = 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters'
+        $clientParams = 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters'
+        $lsaParams = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
+        foreach ($name in @('SMB1', 'RequireSecuritySignature', 'EnableSecuritySignature', 'RestrictNullSessAccess', 'NullSessionShares', 'NullSessionPipes', 'EnableGuestAccess')) {
+            try {
+                $value = (Get-ItemProperty -LiteralPath $serverParams -Name $name -ErrorAction Stop).$name
+                if ($value -is [array]) { $value = ($value -join ', ') }
+                $values.Add([pscustomobject]@{ Scope = 'LanmanServer\Parameters'; Name = $name; Value = [string]$value })
+            }
+            catch { }
+        }
+        foreach ($name in @('RequireSecuritySignature', 'EnableSecuritySignature')) {
+            try {
+                $value = (Get-ItemProperty -LiteralPath $clientParams -Name $name -ErrorAction Stop).$name
+                $values.Add([pscustomobject]@{ Scope = 'LanmanWorkstation\Parameters'; Name = $name; Value = [string]$value })
+            }
+            catch { }
+        }
+        foreach ($name in @('EveryoneIncludesAnonymous', 'LimitBlankPasswordUse', 'RestrictAnonymous', 'RestrictAnonymousSAM')) {
+            try {
+                $value = (Get-ItemProperty -LiteralPath $lsaParams -Name $name -ErrorAction Stop).$name
+                $values.Add([pscustomobject]@{ Scope = 'Lsa'; Name = $name; Value = [string]$value })
+            }
+            catch { }
+        }
+        try {
+            $guest = @(Get-CimInstance -ClassName Win32_UserAccount -Filter 'LocalAccount=True' -ErrorAction Stop |
+                Where-Object { [string]$_.SID -match '-501$' } |
+                Select-Object -First 1)
+            if ($guest.Count -gt 0) {
+                $values.Add([pscustomobject]@{ Scope = 'Account'; Name = 'Guest'; Value = ('Disabled=' + [string]$guest[0].Disabled + '; Lockout=' + [string]$guest[0].Lockout) })
+            }
+            else { $values.Add([pscustomobject]@{ Scope = 'Account'; Name = 'Guest'; Value = 'the -501 account was not found' }) }
+        }
+        catch { $values.Add([pscustomobject]@{ Scope = 'Account'; Name = 'Guest'; Value = ('unavailable: ' + $_.Exception.Message) }) }
+        return [pscustomobject]@{
+            Values = @($values.ToArray())
+            Notes  = @($notes.ToArray())
+        }
+    }
+    $values = @($result.Values)
+    foreach ($note in @($result.Notes)) { Write-ARInfo ([string]$note) }
+    if ($values.Count -eq 0) {
+        Write-ARInfo 'SMB configuration could not be read by either the cmdlets or the registry.'
+        Set-ARStatus 'SMB audit: nothing found' 'Ok'
+        return
+    }
+    Show-ARText ($values | Sort-Object Scope, Name | Format-Table Scope, Name, Value -AutoSize -Wrap)
+    function Get-ARSmbValue {
+        param($Rows, [string]$Scope, [string]$Name)
+        foreach ($row in @($Rows)) {
+            if ([string]$row.Scope -eq $Scope -and [string]$row.Name -eq $Name) { return [string]$row.Value }
+        }
+        return ''
+    }
+    $smb1 = Get-ARSmbValue -Rows $values -Scope 'SmbServerConfiguration' -Name 'EnableSMB1Protocol'
+    if ($smb1 -eq '') { $smb1 = Get-ARSmbValue -Rows $values -Scope 'LanmanServer\Parameters' -Name 'SMB1' }
+    $serverSigning = Get-ARSmbValue -Rows $values -Scope 'SmbServerConfiguration' -Name 'RequireSecuritySignature'
+    if ($serverSigning -eq '') { $serverSigning = Get-ARSmbValue -Rows $values -Scope 'LanmanServer\Parameters' -Name 'RequireSecuritySignature' }
+    $restrict = Get-ARSmbValue -Rows $values -Scope 'SmbServerConfiguration' -Name 'RestrictNullSessAccess'
+    if ($restrict -eq '') { $restrict = Get-ARSmbValue -Rows $values -Scope 'LanmanServer\Parameters' -Name 'RestrictNullSessAccess' }
+    $anonymous = Get-ARSmbValue -Rows $values -Scope 'Lsa' -Name 'EveryoneIncludesAnonymous'
+    $nullShares = Get-ARSmbValue -Rows $values -Scope 'SmbServerConfiguration' -Name 'NullSessionShares'
+    if ($nullShares -eq '') { $nullShares = Get-ARSmbValue -Rows $values -Scope 'LanmanServer\Parameters' -Name 'NullSessionShares' }
+    $nullPipes = Get-ARSmbValue -Rows $values -Scope 'SmbServerConfiguration' -Name 'NullSessionPipes'
+    if ($nullPipes -eq '') { $nullPipes = Get-ARSmbValue -Rows $values -Scope 'LanmanServer\Parameters' -Name 'NullSessionPipes' }
+    Write-ARInfo ('SMB1 enabled: ' + $smb1 + '; SMB signing required: ' + $serverSigning + '; restricted null sessions: ' + $restrict + '; EveryoneIncludesAnonymous: ' + $anonymous)
+    if ($smb1 -match '(?i)^(true|1)$') { Write-ARWarn 'SMB1 is enabled: legacy dialect and its exploit surface are exposed.' }
+    if ($serverSigning -match '(?i)^(false|0)$') { Write-ARWarn 'SMB signing is not required: relay attacks against SMB are possible.' }
+    if ($restrict -match '(?i)^(false|0)$' -or $anonymous -match '(?i)^(true|1)$') { Write-ARWarn 'Null sessions are not fully restricted: anonymous enumeration may work.' }
+    if (-not [string]::IsNullOrWhiteSpace($nullShares)) { Write-ARWarn ('Null session shares configured: ' + $nullShares) }
+    if (-not [string]::IsNullOrWhiteSpace($nullPipes)) { Write-ARWarn ('Null session pipes configured: ' + $nullPipes) }
+    Write-ARInfo 'Read-only: SMB settings were only read.'
+    Set-ARStatus 'SMB audit complete' 'Ok'
+}
+
+function Invoke-ARModulePatchAudit {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Patch audit'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $updates = @(Get-CimInstance -ClassName Win32_QuickFixEngineering -ErrorAction Stop | Select-Object -First ($cap + 1))
+        $truncated = $false
+        if ($updates.Count -gt $cap) { $updates = @($updates | Select-Object -First $cap); $truncated = $true }
+        $rows = New-Object System.Collections.Generic.List[object]
+        $newest = $null
+        $parseFailures = 0
+        foreach ($update in $updates) {
+            $hotfix = [string]$update.HotFixID
+            $installedText = ''
+            try { $installedText = [string]$update.InstalledOn } catch { }
+            $installedDate = $null
+            if (-not [string]::IsNullOrWhiteSpace($installedText)) {
+                foreach ($format in @('M/d/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd', 'yyyyMMdd', 'd/M/yyyy', 'dd/MM/yyyy', 'M/d/yy', 'MM/dd/yy')) {
+                    try { $installedDate = [datetime]::ParseExact($installedText, $format, [System.Globalization.CultureInfo]::InvariantCulture); break } catch { }
+                }
+                if ($null -eq $installedDate) {
+                    try { $installedDate = [datetime]::Parse($installedText, [System.Globalization.CultureInfo]::InvariantCulture) } catch { $parseFailures++ }
+                }
+            }
+            if ($null -ne $installedDate -and ($null -eq $newest -or $installedDate -gt $newest)) { $newest = $installedDate }
+            $category = 'Other'
+            if ($hotfix -match '(?i)^KB(4012212|4012213|4012214|4012215|4012216|4012217|4012598|4551762|4560960)$') { $category = 'SMB' }
+            elseif ($hotfix -match '(?i)^KB(4499175|4500331)$') { $category = 'RDP' }
+            elseif ($hotfix -match '(?i)^KB(5004945|5004953|5004954|5004955|5004956|5004959|5003637|5001330|4601319)$') { $category = 'Privilege escalation' }
+            $rows.Add([pscustomobject]@{
+                HotFix      = $hotfix
+                Category    = $category
+                Installed   = $installedText
+                Description = [string]$update.Description
+            })
+        }
+        $newestText = ''
+        if ($null -ne $newest) { $newestText = $newest.ToString('yyyy-MM-dd') }
+        return [pscustomobject]@{
+            Rows          = @($rows.ToArray())
+            Newest        = $newestText
+            ParseFailures = $parseFailures
+            Truncated     = $truncated
+        }
+    }
+    $rows = @($result.Rows)
+    if ([bool]$result.Truncated) { Write-ARWarn 'Hotfix list capped at 2000 entries.' }
+    if ($rows.Count -eq 0) {
+        Write-ARInfo 'Win32_QuickFixEngineering returned no hotfix.'
+        Set-ARStatus 'Patch audit: nothing found' 'Ok'
+        return
+    }
+    Write-ARInfo ('Hotfixes: ' + [string]$rows.Count + '; newest installed: ' + [string]$result.Newest + '; unparsed dates: ' + [string]$result.ParseFailures + '.')
+    foreach ($group in @($rows | Group-Object Category | Sort-Object Name)) {
+        Write-ARInfo ('  ' + [string]$group.Name + ': ' + [string]$group.Count)
+    }
+    $interesting = @($rows | Where-Object { $_.Category -ne 'Other' } | Sort-Object Category, HotFix)
+    if ($interesting.Count -gt 0) {
+        Show-ARText ($interesting | Format-Table HotFix, Category, Installed, Description -AutoSize -Wrap)
+    }
+    else { Write-ARInfo 'No landmark SMB, RDP or privilege-escalation update is present.' }
+    $other = @($rows | Where-Object { $_.Category -eq 'Other' })
+    if ($other.Count -gt 0) { Write-ARInfo ('Other updates: ' + [string]$other.Count + ' (not printed; the category map only covers landmark KBs).') }
+    Write-ARInfo 'Read-only: the update inventory was only read.'
+    Set-ARStatus 'Patch audit complete' 'Ok'
 }
 
 function Show-ARLineLanguagePicker {

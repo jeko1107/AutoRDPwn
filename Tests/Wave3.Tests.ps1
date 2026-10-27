@@ -1,11 +1,14 @@
 # Tests\Wave3.Tests.ps1
 #
-# Wave 3 (group A, credential access) contracts for the merge gate:
+# Wave 3 contracts for the merge gate. Two packs share this file:
 #
-#   1. catalog: exactly one entry for 220..229, each mapped to its expected
-#      handler, the ten ids forming one contiguous block, no catalog id
-#      declared twice, and every one of them gated with -NeedsSession $false
-#      except 227 (Kerberos cache runs against a live session).
+#   group A, credential access, ids 220..229
+#   group B, discovery, ids 320..332
+#
+#   1. catalog: exactly one entry for every id in each pack, each mapped to its
+#      expected handler, each pack forming one contiguous block, no catalog id
+#      declared twice, and every id gated with -NeedsSession $false except 227
+#      (Kerberos cache runs against a live session).
 #   2. handlers: every wave3 handler is defined exactly once across src\*.ps1
 #      (AST function definitions, never grep), and no handler named by any
 #      New-ARAction call is defined twice anywhere in src\.
@@ -118,7 +121,53 @@ $script:ArWave3Targets = @(
     [pscustomobject]@{ Id = '229'; Handler = 'Invoke-ARAttackCachedLogons';       NeedsSession = $false }
 )
 
+# The thirteen discovery ids of wave 3 group B. All read-only against the target
+# and none of them opens a session: they ride the same remote channel as the
+# rest of the catalog but do not need an interactive one.
+$script:ArWave3DiscoveryTargets = @(
+    [pscustomobject]@{ Id = '320'; Handler = 'Invoke-ARModuleHostAudit';      NeedsSession = $false }
+    [pscustomobject]@{ Id = '321'; Handler = 'Invoke-ARModuleAvEnum';         NeedsSession = $false }
+    [pscustomobject]@{ Id = '322'; Handler = 'Invoke-ARModuleShareEnum';      NeedsSession = $false }
+    [pscustomobject]@{ Id = '323'; Handler = 'Invoke-ARModuleLocalAdmins';    NeedsSession = $false }
+    [pscustomobject]@{ Id = '324'; Handler = 'Invoke-ARModuleSoftwareEnum';   NeedsSession = $false }
+    [pscustomobject]@{ Id = '325'; Handler = 'Invoke-ARModuleTaskEnum';       NeedsSession = $false }
+    [pscustomobject]@{ Id = '326'; Handler = 'Invoke-ARModuleServiceEnum';    NeedsSession = $false }
+    [pscustomobject]@{ Id = '327'; Handler = 'Invoke-ARModuleAutoruns';       NeedsSession = $false }
+    [pscustomobject]@{ Id = '328'; Handler = 'Invoke-ARModuleDomainInfo';     NeedsSession = $false }
+    [pscustomobject]@{ Id = '329'; Handler = 'Invoke-ARModuleNetworkConfig';  NeedsSession = $false }
+    [pscustomobject]@{ Id = '330'; Handler = 'Invoke-ARModuleArpTable';       NeedsSession = $false }
+    [pscustomobject]@{ Id = '331'; Handler = 'Invoke-ARModuleSmbAudit';       NeedsSession = $false }
+    [pscustomobject]@{ Id = '332'; Handler = 'Invoke-ARModulePatchAudit';     NeedsSession = $false }
+)
+
+# Both packs, for the checks that apply to every wave3 id.
+$script:ArWave3AllTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets)
+
 $script:ArWave3Rows = @(Get-ArWave3CatalogRows)
+
+# One pack, one contiguous run of ids: every id between the pack's first and
+# last is present, and nothing outside the pack leaks into that range. Both
+# packs are proven by the same code so a gap names the pack that owns it.
+function Assert-ArWave3ContiguousBlock {
+    param(
+        [Parameter(Mandatory = $true)]$Targets,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
+    $expected = @($Targets | ForEach-Object { [int]$_.Id })
+    $first = [int]($expected | Measure-Object -Minimum).Minimum
+    $last = [int]($expected | Measure-Object -Maximum).Maximum
+    $present = @($script:ArWave3Rows | Where-Object { [int]$_.Id -ge $first -and [int]$_.Id -le $last } | ForEach-Object { [int]$_.Id } | Sort-Object -Unique)
+    $missing = @($expected | Where-Object { $present -notcontains $_ })
+    $unexpected = @($present | Where-Object { $expected -notcontains $_ })
+    if ($missing.Count -eq 0 -and $unexpected.Count -eq 0) { return }
+    $detail = New-Object System.Collections.ArrayList
+    if ($missing.Count -gt 0) { $null = $detail.Add('missing: ' + ($missing -join ', ')) }
+    if ($unexpected.Count -gt 0) { $null = $detail.Add('outside the block: ' + ($unexpected -join ', ')) }
+    throw (Format-ArAssertion -Message $Message `
+        -Expected (($expected | ForEach-Object { [string]$_ }) -join ', ') `
+        -Actual (($present | ForEach-Object { [string]$_ }) -join ', ') `
+        -Detail ($detail -join '; '))
+}
 
 # --------------------------------------------------------------------------- #
 # contract 1 - catalog ids, handlers, contiguity, uniqueness, session gate
@@ -128,7 +177,7 @@ Describe 'wave3 catalog ids' {
 
     It 'declares exactly one catalog entry for every wave3 id' {
         $problems = New-Object System.Collections.ArrayList
-        foreach ($target in $script:ArWave3Targets) {
+        foreach ($target in $script:ArWave3AllTargets) {
             $located = @($script:ArWave3Rows | Where-Object { $_.Id -eq $target.Id })
             if ($located.Count -eq 0) {
                 $null = $problems.Add(('id {0} is not in the catalog: no New-ARAction -Id ''{0}'' call anywhere in src\*.ps1' -f $target.Id))
@@ -144,7 +193,7 @@ Describe 'wave3 catalog ids' {
 
     It 'maps every wave3 id to its expected handler' {
         $problems = New-Object System.Collections.ArrayList
-        foreach ($target in $script:ArWave3Targets) {
+        foreach ($target in $script:ArWave3AllTargets) {
             $located = @($script:ArWave3Rows | Where-Object { $_.Id -eq $target.Id })
             if ($located.Count -ne 1) { continue }   # absence and duplication belong to the test above
             if ([string]$located[0].Handler -ceq $target.Handler) { continue }
@@ -155,20 +204,17 @@ Describe 'wave3 catalog ids' {
     }
 
     It 'declares the wave3 ids as one contiguous block from 220 to 229' {
-        $expected = @($script:ArWave3Targets | ForEach-Object { [int]$_.Id })
-        $present = @($script:ArWave3Rows | Where-Object { [int]$_.Id -ge 220 -and [int]$_.Id -le 229 } | ForEach-Object { [int]$_.Id } | Sort-Object -Unique)
-        $missing = @($expected | Where-Object { $present -notcontains $_ })
-        $unexpected = @($present | Where-Object { $expected -notcontains $_ })
-        if ($missing.Count -eq 0 -and $unexpected.Count -eq 0) { return }
-        $detail = New-Object System.Collections.ArrayList
-        if ($missing.Count -gt 0) { $null = $detail.Add('missing: ' + ($missing -join ', ')) }
-        if ($unexpected.Count -gt 0) { $null = $detail.Add('outside the block: ' + ($unexpected -join ', ')) }
-        throw (Format-ArAssertion -Message 'the wave3 credential-access ids are not the contiguous block 220..229' `
-            -Expected (($expected | ForEach-Object { [string]$_ }) -join ', ') `
-            -Actual (($present | ForEach-Object { [string]$_ }) -join ', ') `
-            -Detail ($detail -join '; '))
+        Assert-ArWave3ContiguousBlock -Targets $script:ArWave3Targets `
+            -Message 'the wave3 credential-access ids are not the contiguous block 220..229'
     }
 
+    It 'declares the discovery ids as one contiguous block from 320 to 332' {
+        Assert-ArWave3ContiguousBlock -Targets $script:ArWave3DiscoveryTargets `
+            -Message 'the wave3 discovery ids are not the contiguous block 320..332'
+    }
+
+    # Global on purpose: it groups every New-ARAction row in src\*.ps1, so it
+    # covers both packs and any id outside them.
     It 'declares no catalog id twice' {
         $duplicates = @($script:ArWave3Rows | Group-Object Id | Where-Object { $_.Count -gt 1 })
         if ($duplicates.Count -eq 0) { return }
@@ -180,7 +226,7 @@ Describe 'wave3 catalog ids' {
 
     It 'gates the wave3 ids on a session only where the contract says so' {
         $problems = New-Object System.Collections.ArrayList
-        foreach ($target in $script:ArWave3Targets) {
+        foreach ($target in $script:ArWave3AllTargets) {
             $located = @($script:ArWave3Rows | Where-Object { $_.Id -eq $target.Id })
             if ($located.Count -ne 1) { continue }
             if ($located[0].NeedsSession -eq $target.NeedsSession) { continue }
@@ -198,7 +244,7 @@ Describe 'wave3 catalog ids' {
 
 Describe 'wave3 handlers' {
 
-    foreach ($target in $script:ArWave3Targets) {
+    foreach ($target in $script:ArWave3AllTargets) {
         $definitions = @(Get-ArWave3Definitions -Name $target.Handler)
         $testName = ('id {0} maps to {1} and it is defined exactly once in src\*.ps1' -f $target.Id, $target.Handler)
         if ($definitions.Count -eq 0) {
@@ -264,7 +310,7 @@ Describe 'wave3 locale keys' {
             -Message 'the wave3 locale contract needs all seven language files; a missing file makes the key check meaningless'
     }
 
-    $waveRows = @($script:ArWave3Rows | Where-Object { @($script:ArWave3Targets | ForEach-Object { $_.Id }) -contains $_.Id })
+    $waveRows = @($script:ArWave3Rows | Where-Object { @($script:ArWave3AllTargets | ForEach-Object { $_.Id }) -contains $_.Id })
 
     if ($waveRows.Count -eq 0) {
         It-Skip -Name 'resolves the title key of every wave3 id in all seven languages' `
@@ -283,7 +329,7 @@ Describe 'wave3 locale keys' {
             $keyByFile[$fileSystem.Name] = @(Get-ArWave3LanguageKeys -Path $fileSystem.FullName)
         }
 
-        foreach ($target in $script:ArWave3Targets) {
+        foreach ($target in $script:ArWave3AllTargets) {
             $located = @($waveRows | Where-Object { $_.Id -eq $target.Id })
             $testName = ('id {0} title key {1} resolves in all seven languages' -f $target.Id, (& { if ($located.Count -eq 1) { $located[0].TitleKey } else { '<no entry>' } }))
             if ($located.Count -ne 1) {

@@ -2,7 +2,7 @@
 
 AutoRDPwn is a PowerShell post-exploitation framework for Windows. It automates
 the Shadow attack — a SYSTEM scheduled task that opens a console session on the
-remote host — and puts 57 actions behind one menu: remote execution, shells,
+remote host — and puts 70 actions behind one menu: remote execution, shells,
 credential extraction, pivoting, desktop forensics, persistence, collection and
 privilege escalation.
 
@@ -137,6 +137,19 @@ opens contextual help, `Q` or `X` quits.
 | 304 | Networking / Pivoting | Network Creds Scanner |
 | 207 | Networking / Pivoting | Credential spray |
 | 901 | Networking / Pivoting | File exfiltration |
+| 320 | Discovery | Host audit |
+| 321 | Discovery | AV and EDR enumeration |
+| 322 | Discovery | SMB shares |
+| 323 | Discovery | Local administrators |
+| 324 | Discovery | Installed software |
+| 325 | Discovery | Scheduled tasks |
+| 326 | Discovery | Services |
+| 327 | Discovery | Autoruns |
+| 328 | Discovery | Domain information |
+| 329 | Discovery | Network configuration |
+| 330 | Discovery | ARP and connections |
+| 331 | Discovery | SMB audit |
+| 332 | Discovery | Patch audit |
 | 401 | Remote Desktop Forensics | Rebuild the image cache |
 | 402 | Remote Desktop Forensics | List local users and groups |
 | 403 | Remote Desktop Forensics | Extract session credentials (SessionGopher) |

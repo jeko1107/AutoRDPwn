@@ -1,3 +1,11 @@
+# Versión 6.0 — wave 3b (descubrimiento)
+• Trece acciones nuevas de sólo lectura en el catálogo, en un grupo propio de descubrimiento: 320 Host audit, 321 AV and EDR enumeration, 322 SMB shares, 323 Local administrators, 324 Installed software, 325 Scheduled tasks, 326 Services, 327 Autoruns, 328 Domain information, 329 Network configuration, 330 ARP and connections, 331 SMB audit y 332 Patch audit
+• El catálogo pasa de 57 a 70 acciones; las trece declaran -NeedsSession $false y ninguna escribe en el objetivo, crea un fichero ni deja una tarea, así que no hay nada que limpiar
+• Claves de idioma nuevas: txt194 a txt206, con el mismo juego de 206 claves en los siete ficheros, BOM y CRLF conservados
+• docs\MODULES.md documenta la sección 320-332 con la tabla id / acción / handler / qué necesita y la nota de que las trece son de sólo lectura
+• Tests\Wave3.Tests.ps1 amplía los contratos a los trece ids nuevos: entrada única en el catálogo, handler esperado, definición única en src\*.ps1, bloque contiguo 320-332, ningún id repetido entre los dos grupos, puerta de sesión correcta, clave de título resuelta en los siete idiomas y parse de src sin errores
+• Tests\Test-Tui.ps1 pasa a esperar 70 acciones
+
 # Versión 6.0 — wave 3a (acceso a credenciales)
 • Diez acciones nuevas en el catálogo, dentro del grupo "Passwords and hashes": 220 WDigest plaintext logon, 221 Credential Manager vault, 222 Browser saved passwords, 223 Wi-Fi keys in clear, 224 DPAPI master keys, 225 LSA secrets (SECURITY hive), 226 SSH private keys, 227 Kerberos ticket cache, 228 Token privileges y 229 Cached domain logons
 • El catálogo pasa de 47 a 57 acciones; sólo 227 declara -NeedsSession $true y las otras nueve trabajan contra el objetivo sin sesión

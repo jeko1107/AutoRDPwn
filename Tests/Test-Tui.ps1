@@ -68,8 +68,8 @@ $catalog = @(Get-ARActionCatalog)
 $actions = @($catalog | Where-Object { $_.Kind -eq 'Action' })
 $groups = @($catalog | Where-Object { $_.Kind -eq 'Group' })
 
-Assert-Equal -Actual $actions.Count -Expected 57 -Name 'catalog has 57 actions'
-Assert-Equal -Actual $groups.Count -Expected 7 -Name 'catalog has 7 groups'
+Assert-Equal -Actual $actions.Count -Expected 70 -Name 'catalog has 70 actions'
+Assert-Equal -Actual $groups.Count -Expected 8 -Name 'catalog has 8 groups'
 
 $uniqueIds = @($actions | Select-Object -ExpandProperty Id -Unique)
 Assert-Equal -Actual $uniqueIds.Count -Expected $actions.Count -Name 'action IDs are unique'

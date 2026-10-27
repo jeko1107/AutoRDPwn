@@ -1,7 +1,7 @@
 # Modules
 
 One section per catalog action, in catalog order, grouped by the category buckets
-that `Get-ARActionCategories` builds from the catalog. There are 57 actions.
+that `Get-ARActionCategories` builds from the catalog. There are 70 actions.
 
 Unless a section says otherwise, an action needs a target in the target editor
 and a working WinRM session (TCP 5985) to that target. "Leaves" lists what the
@@ -10,8 +10,8 @@ and `Invoke-ARCleanup`, which run from the `finally` block on exit. Actions that
 pull a file back write it under `%LOCALAPPDATA%\AutoRDPwn\loot\` on the operator
 and delete the remote copy.
 
-Actions 205 to 207, 220 to 229, 801 to 805, 901 to 904 and 504 are implemented in
-`src\02-actions.ps1`. Read the handler before scripting against it.
+Actions 205 to 207, 220 to 229, 320 to 332, 801 to 805, 901 to 904 and 504 are
+implemented in `src\02-actions.ps1`. Read the handler before scripting against it.
 
 ## Quick actions
 
@@ -141,6 +141,34 @@ column is the catalog gate: all ten need a target in the target editor, and only
 - Runs: each handler collects the material on the target and either prints it or pulls an archive to `%LOCALAPPDATA%\AutoRDPwn\loot\`; decryption and parsing happen offline on the operator.
 - Leaves: any remote working directory a handler creates is registered with the cleanup lists before use, so `Invoke-ARCleanup` removes it; read the handler for the exact path and for the registry or hive values it restores.
 - Note: 220 is the only row that changes target state on purpose (it turns on plaintext WDigest caching) and the only one whose payoff appears at the next logon. 205, 206 and 225 overlap on purpose: 205 is a live minidump, 206 keeps the three hives, 225 keeps only `SECURITY` and `SYSTEM` for `secretsdump`.
+
+### 320-332. Discovery pack
+
+Thirteen read-only actions that inventory the target. The "needs" column is the
+catalog gate: all thirteen need a target in the target editor and every one of
+them carries `-NeedsSession $false`. Nothing in this pack writes to the target,
+creates a file or leaves a task, so there is nothing for cleanup to remove; the
+handler is where the exact fields of each row are defined.
+
+| id | action | handler | what it needs |
+| --- | --- | --- | --- |
+| 320 | Host audit | `Invoke-ARModuleHostAudit` | target; read-only host baseline, no session |
+| 321 | AV and EDR enumeration | `Invoke-ARModuleAvEnum` | target; read-only security-product inventory, no session |
+| 322 | SMB shares | `Invoke-ARModuleShareEnum` | target; read-only share inventory, no session |
+| 323 | Local administrators | `Invoke-ARModuleLocalAdmins` | target; read-only group membership, no session |
+| 324 | Installed software | `Invoke-ARModuleSoftwareEnum` | target; read-only installed-program inventory, no session |
+| 325 | Scheduled tasks | `Invoke-ARModuleTaskEnum` | target; read-only task inventory, no session |
+| 326 | Services | `Invoke-ARModuleServiceEnum` | target; read-only service inventory, no session |
+| 327 | Autoruns | `Invoke-ARModuleAutoruns` | target; read-only startup inventory, no session |
+| 328 | Domain information | `Invoke-ARModuleDomainInfo` | target; read-only domain and policy query, no session |
+| 329 | Network configuration | `Invoke-ARModuleNetworkConfig` | target; read-only adapter and route inventory, no session |
+| 330 | ARP and connections | `Invoke-ARModuleArpTable` | target; read-only ARP cache and connection list, no session |
+| 331 | SMB audit | `Invoke-ARModuleSmbAudit` | target; read-only SMB configuration audit, no session |
+| 332 | Patch audit | `Invoke-ARModulePatchAudit` | target; read-only hotfix and update inventory, no session |
+
+- Runs: each handler queries the target and prints the result on the operator; none of the thirteen changes a value, a service state or a permission.
+- Leaves: nothing on the target and nothing under `%LOCALAPPDATA%\AutoRDPwn\loot\`.
+- Note: `-NeedsSession $false` means the action does not require an interactive session, not that it skips the target: the row still needs a reachable host and the credential the rest of the catalog uses.
 
 ## Networking / Pivoting
 
