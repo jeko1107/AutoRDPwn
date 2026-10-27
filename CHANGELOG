@@ -1,3 +1,14 @@
+# Versión 5.2 (fork)
+• Nueva opción 8 en el menú: Quick Screen (Stealth VNC), acceso directo al módulo Stealth Screen
+• Soporte del parámetro -ViewOnly en modo view: ver la pantalla remota sin enviar input
+• Nueva elevación de privilegios: sin ser Administrador se solicita UAC normal (Start-Process -Verb RunAs); si se cancela, se muestra un error y se indica ejecutar como Administrador o usar -noadmin
+• -noadmin mantiene el menú en la consola actual, sin elevación
+• Menú unificado tipo TUI: vectores de ataque y módulos en una sola pantalla con flechas, sin menú aparte de módulos
+• Quick Screen con scripts temporales en C:\Windows\Temp que se eliminan al terminar: tarea programada con comando codificado, módulo VNC servido por HTTP desde el atacante y decodificado en memoria
+• Parche AMSI construido con códigos de carácter y exclusiones de Defender aplicadas antes de ejecutar el payload
+• -option acepta los IDs de acción (1-8, 101-704) y los alias heredados 11-17 para abrir directamente cualquier módulo
+
+
 # Versión 5.0
 • Nuevo logo rediseñado totalmente desde cero
 • Traducción completa en 7 idiomas: es, en, fr, de, it, ru, pt

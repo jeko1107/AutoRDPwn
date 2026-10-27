@@ -1,0 +1,3 @@
+_sandbox/
+Resources/Tools/*
+!Resources/Tools/.gitignore

