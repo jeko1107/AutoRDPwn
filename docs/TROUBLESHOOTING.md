@@ -222,8 +222,8 @@ mstsc /v:<target> /shadow:1 /noconsentprompt /control /f
   `Cleanup skipped: no session to <target>` and only the operator-side traces are
   removed. `-noclean` skips the target side on purpose.
 - Fix: re-run any action that opens a session, exit normally, and let the
-  `finally` in `50-main.ps1` clean up. On a target that cannot be reached, remove
-  the artifacts by hand.
+  `finally` in `src\03-main.ps1` clean up. On a target that cannot be
+  reached, remove the artifacts by hand.
 
 ```powershell
 Get-ScheduledTask | Where-Object { $_.TaskName -like 'AutoRDPwn*' -or $_.TaskName -match '^W[0-9A-F]{8}$' }

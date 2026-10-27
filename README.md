@@ -70,7 +70,7 @@ cd AutoRDPwn
 .\Build.ps1 -OutputPath _sandbox\gen.ps1 # scratch build for tests
 ```
 
-`Build.ps1` concatenates `src\00-header.ps1` through `src\50-main.ps1`, parses
+`Build.ps1` concatenates `src\01-core.ps1` through `src\03-main.ps1`, parses
 every part and refuses to write output that does not parse.
 
 Three ways in:

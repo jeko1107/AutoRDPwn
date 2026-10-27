@@ -342,13 +342,13 @@ function Get-ArContractStaticVariable {
 
 Describe 'target registry backup' {
 
-    $runtimePath = Join-Path $script:ArTestRoot 'src\20-runtime.ps1'
+    $runtimePath = Join-Path $script:ArTestRoot 'src\01-core.ps1'
     $runtimeText = Get-ArContractText -Path $runtimePath
     $backupValues = @('AllowRemoteRPC', 'SecurityLayer', 'LocalAccountTokenFilterPolicy', 'AllowEncryptionOracle')
 
-    It 'declares the backup list in src\20-runtime.ps1' {
+    It 'declares the backup list in src\01-core.ps1' {
         Assert-Match -Text $runtimeText -Pattern '\$script:ARRegistryBackup\s*=' `
-            -Message 'src\20-runtime.ps1 no longer declares $script:ARRegistryBackup; cleanup cannot replay the registry values the shadow engine writes'
+            -Message 'src\01-core.ps1 no longer declares $script:ARRegistryBackup; cleanup cannot replay the registry values the shadow engine writes'
     }
 
     It 'captures at least four registry values through the backup helper' {
@@ -365,13 +365,13 @@ Describe 'target registry backup' {
                     ($node.GetCommandName() -match $capturePattern)
                 }, $true))
         Assert-True ($captures.Count -gt 0) `
-            'src\20-runtime.ps1 captures no registry value before writing (no Save/Record/Capture/Backup-AR*Value call)'
+            'src\01-core.ps1 captures no registry value before writing (no Save/Record/Capture/Backup-AR*Value call)'
         $writes = @($body.FindAll({
                     param($node)
                     ($node -is [System.Management.Automation.Language.CommandAst]) -and
                     ($node.GetCommandName() -eq 'New-ItemProperty')
                 }, $true))
-        Assert-True ($writes.Count -gt 0) 'src\20-runtime.ps1 writes no registry value with New-ItemProperty'
+        Assert-True ($writes.Count -gt 0) 'src\01-core.ps1 writes no registry value with New-ItemProperty'
         Assert-True ([int]$captures[0].Extent.StartOffset -lt [int]$writes[0].Extent.StartOffset) `
             'the registry capture call sits after the first New-ItemProperty; the previous value is overwritten before it is recorded'
 
@@ -387,7 +387,7 @@ Describe 'target registry backup' {
                     ($node.GetCommandName() -match $writerPattern)
                 }, $true))
         Assert-True ($writers.Count -ge 4) `
-            ('src\20-runtime.ps1 has {0} capturing writer call(s); at least four registry values must be recorded before they are written' -f $writers.Count)
+            ('src\01-core.ps1 has {0} capturing writer call(s); at least four registry values must be recorded before they are written' -f $writers.Count)
         $writerText = (@($writers | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine)
         foreach ($value in $backupValues) {
             Assert-Match -Text $writerText -Pattern ([regex]::Escape($value)) `
@@ -414,12 +414,12 @@ Describe 'target registry backup' {
 
 Describe 'installed products' {
 
-    $runtimePath = Join-Path $script:ArTestRoot 'src\20-runtime.ps1'
+    $runtimePath = Join-Path $script:ArTestRoot 'src\01-core.ps1'
     $runtimeText = Get-ArContractText -Path $runtimePath
 
-    It 'declares $script:ARInstalledProducts in src\20-runtime.ps1' {
+    It 'declares $script:ARInstalledProducts in src\01-core.ps1' {
         Assert-Match -Text $runtimeText -Pattern '\$script:ARInstalledProducts\s*=' `
-            -Message 'src\20-runtime.ps1 no longer declares $script:ARInstalledProducts; an MSI installed during the run is never uninstalled'
+            -Message 'src\01-core.ps1 no longer declares $script:ARInstalledProducts; an MSI installed during the run is never uninstalled'
     }
 
     It 'uninstalls tracked products with msiexec /x' {
@@ -608,7 +608,7 @@ Describe 'cleanup hooks' {
         $calls = @(Get-ArCommandAsts -Ast $cleanup.Ast.Body -Name 'Reset-AROperatorPortProxies')
         Assert-True ($calls.Count -gt 0) 'Invoke-ARCleanup never calls Reset-AROperatorPortProxies; netsh portproxy entries survive the session'
         $guarded = Test-ArContractGuardedCall -Body $cleanup.Ast.Body -CommandName 'Reset-AROperatorPortProxies'
-        Assert-True $guarded 'Reset-AROperatorPortProxies is called without an if (Get-Command ...) guard; a partial build without 40-modules throws during cleanup'
+        Assert-True $guarded 'Reset-AROperatorPortProxies is called without an if (Get-Command ...) guard; a partial build without 02-actions throws during cleanup'
     }
 
     It 'calls the module artifact cleanup behind a Get-Command guard' {
@@ -616,14 +616,14 @@ Describe 'cleanup hooks' {
         $calls = @(Get-ArCommandAsts -Ast $cleanup.Ast.Body -Name 'Remove-ARModuleArtifacts')
         Assert-True ($calls.Count -gt 0) 'Invoke-ARCleanup never calls Remove-ARModuleArtifacts; module files survive the session'
         $guarded = Test-ArContractGuardedCall -Body $cleanup.Ast.Body -CommandName 'Remove-ARModuleArtifacts'
-        Assert-True $guarded 'Remove-ARModuleArtifacts is called without an if (Get-Command ...) guard; a partial build without 40-modules throws during cleanup'
+        Assert-True $guarded 'Remove-ARModuleArtifacts is called without an if (Get-Command ...) guard; a partial build without 02-actions throws during cleanup'
     }
 
-    It 'defines both hooks once, in src\40-modules.ps1' {
+    It 'defines both hooks once, in src\02-actions.ps1' {
         foreach ($name in @('Reset-AROperatorPortProxies', 'Remove-ARModuleArtifacts')) {
             $definition = Get-ArContractDefinitionCount -Name $name
             Assert-Equal 1 $definition.Count ('{0} is defined {1} time(s) in src; the cleanup hook must exist exactly once' -f $name, $definition.Count)
-            Assert-Equal '40-modules.ps1' ($definition.Files -join ', ') ('{0} is not defined in src\40-modules.ps1; Invoke-ARCleanup would skip it' -f $name)
+            Assert-Equal '02-actions.ps1' ($definition.Files -join ', ') ('{0} is not defined in src\02-actions.ps1; Invoke-ARCleanup would skip it' -f $name)
         }
     }
 }
@@ -634,14 +634,14 @@ Describe 'cleanup hooks' {
 
 Describe 'exit codes' {
 
-    $mainPath = Join-Path $script:ArTestRoot 'src\50-main.ps1'
+    $mainPath = Join-Path $script:ArTestRoot 'src\03-main.ps1'
     $mainText = Get-ArContractText -Path $mainPath
 
-    It 'src\50-main.ps1 exits non-zero when -option fails' {
+    It 'src\03-main.ps1 exits non-zero when -option fails' {
         Assert-Match -Text $mainText -Pattern '\bexit\s+1\b' `
-            -Message 'src\50-main.ps1 never exits 1; a failed -option run reports success to the caller'
+            -Message 'src\03-main.ps1 never exits 1; a failed -option run reports success to the caller'
         Assert-Match -Text $mainText -Pattern '\$script:ARLastFailure' `
-            -Message 'src\50-main.ps1 never reads $script:ARLastFailure; a failed action cannot set the exit code'
+            -Message 'src\03-main.ps1 never reads $script:ARLastFailure; a failed action cannot set the exit code'
     }
 
     It 'Invoke-ARAction records the failure message in its catch' {
@@ -667,14 +667,26 @@ Describe 'exit codes' {
 
 Describe 'TUI input safety' {
 
-    $tuiPath = Join-Path $script:ArTestRoot 'src\10-tui.ps1'
+    $tuiPath = Join-Path $script:ArTestRoot 'src\01-core.ps1'
     $tuiText = Get-ArContractText -Path $tuiPath
-    $tuiAst = (Get-ArParseResult -Path $tuiPath).Ast
+    # 01-core is header + TUI + runtime. This contract is about the TUI menu, so
+    # the AST stops where the runtime state block starts. The second assignment
+    # of that block is a stable marker and keeps the analysed tree identical to
+    # the old, TUI-only source file.
+    $runtimeAnchor = '$script:AROverrideCredential = $null'
+    $runtimeStart = $tuiText.IndexOf($runtimeAnchor)
+    if ($runtimeStart -lt 0) {
+        throw ('cannot locate the runtime block in src\01-core.ps1: the TUI input-safety contract has no boundary (' + $runtimeAnchor + ')')
+    }
+    $tuiSectionText = $tuiText.Substring(0, $runtimeStart)
+    $tuiTokens = $null
+    $tuiErrors = $null
+    $tuiAst = [System.Management.Automation.Language.Parser]::ParseInput($tuiSectionText, [ref]$tuiTokens, [ref]$tuiErrors)
 
     It 'parses menu input with [int]::TryParse' {
-        $uses = [regex]::Matches($tuiText, '\[int\]::TryParse').Count
+        $uses = [regex]::Matches($tuiSectionText, '\[int\]::TryParse').Count
         Assert-True ($uses -ge 3) `
-            ('src\10-tui.ps1 uses [int]::TryParse {0} time(s); at least three numeric menu paths must parse without throwing' -f $uses)
+            ('the TUI block of src\01-core.ps1 uses [int]::TryParse {0} time(s); at least three numeric menu paths must parse without throwing' -f $uses)
     }
 
     It 'never casts raw Read-* input with [int]' {
@@ -691,7 +703,7 @@ Describe 'TUI input safety' {
             $null = $offenders.Add(('line {0}: {1}' -f $cast.Extent.StartLineNumber, $cast.Extent.Text.Trim()))
         }
         Assert-Equal 0 $offenders.Count `
-            ('src\10-tui.ps1 casts raw Read-* menu input with [int]: ' + ($offenders -join '; ') +
+            ('the TUI block of src\01-core.ps1 casts raw Read-* menu input with [int]: ' + ($offenders -join '; ') +
                 '; a non-numeric entry throws instead of being reparsed')
     }
 }
@@ -702,24 +714,24 @@ Describe 'TUI input safety' {
 
 Describe 'language persistence' {
 
-    $tuiPath = Join-Path $script:ArTestRoot 'src\10-tui.ps1'
+    $tuiPath = Join-Path $script:ArTestRoot 'src\01-core.ps1'
     $tuiText = Get-ArContractText -Path $tuiPath
 
-    It 'defines Get-ARLastLanguage once, in src\10-tui.ps1' {
+    It 'defines Get-ARLastLanguage once, in src\01-core.ps1' {
         $definition = Get-ArContractDefinitionCount -Name 'Get-ARLastLanguage'
         Assert-Equal 1 $definition.Count ('Get-ARLastLanguage is defined {0} time(s) in src; the startup language lookup needs exactly one definition' -f $definition.Count)
-        Assert-Equal '10-tui.ps1' ($definition.Files -join ', ') 'Get-ARLastLanguage is not defined in src\10-tui.ps1; Start-ARApplication cannot restore the language'
+        Assert-Equal '01-core.ps1' ($definition.Files -join ', ') 'Get-ARLastLanguage is not defined in src\01-core.ps1; Start-ARApplication cannot restore the language'
     }
 
-    It 'defines Set-ARLastLanguage once, in src\10-tui.ps1' {
+    It 'defines Set-ARLastLanguage once, in src\01-core.ps1' {
         $definition = Get-ArContractDefinitionCount -Name 'Set-ARLastLanguage'
         Assert-Equal 1 $definition.Count ('Set-ARLastLanguage is defined {0} time(s) in src; the language picker needs exactly one definition' -f $definition.Count)
-        Assert-Equal '10-tui.ps1' ($definition.Files -join ', ') 'Set-ARLastLanguage is not defined in src\10-tui.ps1; the language choice is never saved'
+        Assert-Equal '01-core.ps1' ($definition.Files -join ', ') 'Set-ARLastLanguage is not defined in src\01-core.ps1; the language choice is never saved'
     }
 
     It 'merges Language into the existing last.json instead of overwriting it' {
         $setter = Get-ArFunctionAst -Name 'Set-ARLastLanguage'
-        Assert-NotNull $setter 'Set-ARLastLanguage is missing from src\10-tui.ps1'
+        Assert-NotNull $setter 'Set-ARLastLanguage is missing from src\01-core.ps1'
         $body = $setter.Ast.Body
         $text = $body.Extent.Text
         Assert-Match -Text $text -Pattern 'Language' `
@@ -755,7 +767,7 @@ Describe 'language persistence' {
 
     It 'returns the persisted language from Get-ARLastLanguage' {
         $getter = Get-ArFunctionAst -Name 'Get-ARLastLanguage'
-        Assert-NotNull $getter 'Get-ARLastLanguage is missing from src\10-tui.ps1'
+        Assert-NotNull $getter 'Get-ARLastLanguage is missing from src\01-core.ps1'
         $text = $getter.Ast.Body.Extent.Text
         Assert-Match -Text $text -Pattern 'Language' `
             -Message 'Get-ARLastLanguage never reads the Language property; the saved locale is ignored at startup'
@@ -829,18 +841,18 @@ Describe 'screen route' {
 
 Describe 'version' {
 
-    $headerPath = Join-Path $script:ArTestRoot 'src\00-header.ps1'
+    $headerPath = Join-Path $script:ArTestRoot 'src\01-core.ps1'
     $headerText = Get-ArContractText -Path $headerPath
     $readmeText = Get-ArContractText -Path (Join-Path $script:ArTestRoot 'README.md')
 
-    It 'src\00-header.ps1 sets version 6.0' {
+    It 'src\01-core.ps1 sets version 6.0' {
         Assert-Match -Text $headerText -Pattern '\$script:ARVersion\s*=\s*''6\.0''' `
-            -Message 'src\00-header.ps1 does not set $script:ARVersion = ''6.0''; the build stamps the old version'
+            -Message 'src\01-core.ps1 does not set $script:ARVersion = ''6.0''; the build stamps the old version'
     }
 
     It 'the window title drops the old author handle' {
         $titleLine = @(Get-ArContractLines -Path $headerPath | Where-Object { $_ -match 'WindowTitle' })
-        Assert-True ($titleLine.Count -gt 0) 'src\00-header.ps1 no longer sets a window title'
+        Assert-True ($titleLine.Count -gt 0) 'src\01-core.ps1 no longer sets a window title'
         Assert-Match -Text $titleLine[0] -Pattern 'v6\.0' `
             -Message 'the window title does not say v6.0'
         Assert-NotMatch -Text $titleLine[0] -Pattern 'JoelGMSec' `

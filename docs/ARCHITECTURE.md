@@ -1,6 +1,6 @@
 # Architecture
 
-AutoRDPwn is one PowerShell script assembled from six source parts. `src\` is the
+AutoRDPwn is one PowerShell script assembled from three source parts. `src\` is the
 source of truth; `AutoRDPwn.ps1` in the repository root is generated from it and
 must never be edited by hand. Both files run on Windows PowerShell 5.1 and
 PowerShell 7.
@@ -9,19 +9,16 @@ PowerShell 7.
 
 | file | size | owns |
 | --- | --- | --- |
-| `src\00-header.ps1` | ~140 lines | `param()` block, version, root discovery, elevation, `$script:AR*` flags, CLI values, TLS and proxy setup |
-| `src\10-tui.ps1` | ~2300 lines | action catalog, categories, both interfaces, target profiles, language, favourites, drawing helpers |
-| `src\20-runtime.ps1` | ~1100 lines | sessions, retries, logging, cleanup, Defender exclusions, resource download, action dispatch, shadow engine |
-| `src\30-attacks.ps1` | ~740 lines | the remote-execution actions, the loot and transfer helpers |
-| `src\40-modules.ps1` | ~630 lines | collection, pivoting, persistence and priv-esc modules |
-| `src\50-main.ps1` | ~76 lines | startup, `-option` dispatch, the top-level `try`/`finally` |
+| `src\01-core.ps1` | ~3650 lines | `param()` block, version, root discovery, elevation, `$script:AR*` flags, CLI values, TLS and proxy setup; the action catalog, categories, both interfaces, target profiles, language, favourites, drawing helpers; sessions, retries, logging, cleanup, Defender exclusions, resource download, action dispatch, shadow engine |
+| `src\02-actions.ps1` | ~2100 lines | the remote-execution actions, the loot and transfer helpers, and the collection, pivoting, persistence and priv-esc modules |
+| `src\03-main.ps1` | ~175 lines | startup, `-option` dispatch, the top-level `try`/`finally` |
 
 Load order matters: the header defines `$script:ARRoot` and `$script:ARTools`
-before anything reads a resource, `10-tui` defines `New-ARAction` before
-`20-runtime` calls `Get-ARActionById`, and `50-main` is the only part that
+before anything reads a resource, the TUI block defines `New-ARAction` before
+the runtime block calls `Get-ARActionById`, and `03-main` is the only part that
 actually starts the application.
 
-### 00-header
+### 01-core — header
 
 Sets `$script:ARVersion`, resolves the repository root by looking for
 `Resources\Scripts` next to the script, falls back to
@@ -30,7 +27,7 @@ directories it needs. It also re-launches itself elevated with
 `Start-Process -Verb RunAs`, forwarding every switch it received. No function
 here is called later except `Test-ARHeaderAdmin`.
 
-### 10-tui
+### 01-core — TUI
 
 Three blocks:
 
@@ -46,7 +43,7 @@ The catalog is a flat list of actions and group markers. `Get-ARActionCategories
 walks it once and turns each group marker into a category bucket, so the menu
 cannot drift from the catalog: there is no second list of ids anywhere.
 
-### 20-runtime
+### 01-core — runtime
 
 Everything that talks to the target:
 
@@ -71,14 +68,14 @@ Everything that talks to the target:
   previous state, opens the `mstsc /shadow` client.
 - `Remove-ARTargetArtifacts` and `Invoke-ARCleanup` are the teardown.
 
-### 30-attacks and 40-modules
+### 02-actions — attacks and modules
 
 One function per catalog handler. A handler reads its inputs from
 `$script:ARTarget` or from `Read-ARValue`, does its work, prints through
 `Write-ARInfo` / `Write-ARSuccess` / `Write-ARWarn`, and ends with
 `Set-ARStatus`. Handlers never draw the menu and never call `exit`.
 
-`30-attacks.ps1` also exports three helpers that `40-modules.ps1` reuses:
+The attacks section also exports three helpers that the modules section reuses:
 
 - `Get-ARLootDirectory` — `%LOCALAPPDATA%\AutoRDPwn\loot\<leaf>`, operator side.
 - `New-ARRemoteTempName` — `W` plus eight hex characters, which keeps matching
@@ -86,7 +83,7 @@ One function per catalog handler. A handler reads its inputs from
 - `Receive-ARFileFromTarget` — `Copy-Item -FromSession` first, then a 48 KB
   base64 chunk loop when WinRM truncates the copy.
 
-### 50-main
+### 03-main
 
 Loads the saved language, restores the last profile, applies `-shadow` to the
 mode, initialises the Defender exclusions, dispatches `-option` or enters the
@@ -101,7 +98,7 @@ still tears the target down.
 .\Build.ps1 -OutputPath _sandbox\gen.ps1 # scratch build for tests
 ```
 
-`Build.ps1` parses each of the six parts with the PowerShell parser and refuses
+`Build.ps1` parses each of the three parts with the PowerShell parser and refuses
 to write output when a part has a syntax error. It concatenates them with a
 blank line between parts, writes `AutoRDPwn.ps1.tmp` as UTF-8 with BOM, parses
 the result again, and only then moves it over the target path. A failed build
@@ -180,11 +177,12 @@ for targets touched by older builds.
 
 ## Adding an action
 
-1. Write the handler in `src\30-attacks.ps1` or `src\40-modules.ps1`. Name it
+1. Write the handler in the attacks or modules section of `src\02-actions.ps1`.
+   Name it
    `Invoke-ARAttack<Name>` or `Invoke-ARModule<Name>`; take no parameters unless
    the dispatcher will pass them; read inputs with `Read-ARValue` or
    `Read-ARSecret`; end with `Set-ARStatus`.
-2. Register it in `Get-ARActionCatalog` in `src\10-tui.ps1` with
+2. Register it in `Get-ARActionCatalog` in `src\01-core.ps1` with
    `New-ARAction -Id '<id>' -Title (Get-ARText 'txtNNN' '<fallback>')
    -Description '<one line>' -Handler '<handler>' [-NeedsTarget $false]
    [-NeedsSession $false]`. Place it under the group marker of the category it

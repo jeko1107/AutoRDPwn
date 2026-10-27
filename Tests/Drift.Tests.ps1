@@ -95,7 +95,7 @@ Describe 'build drift' {
     }
 
     It-Warn 'src defines every function the entry point calls' {
-        # 50-main.ps1 boots the app; a function it calls that no src file defines
+        # 03-main.ps1 boots the app; a function it calls that no src file defines
         # means the source build dies before the menu is drawn.
         $function = Get-ArFunctionAst -Name 'Start-ARApplication'
         Assert-NotNull $function 'Start-ARApplication is missing from src\*.ps1'

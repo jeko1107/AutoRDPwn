@@ -1,8 +1,8 @@
 # Usage
 
 AutoRDPwn 6.0 is a Windows PowerShell console application. Everything below
-describes the interface built by `src\10-tui.ps1` and the startup path in
-`src\50-main.ps1`.
+describes the interface built by the TUI section of `src\01-core.ps1` and the
+startup path in `src\03-main.ps1`.
 
 ## Requirements
 
@@ -20,7 +20,7 @@ describes the interface built by `src\10-tui.ps1` and the startup path in
 .\AutoRDPwn.ps1
 ```
 
-Started without administrator rights, `src\00-header.ps1` relaunches
+Started without administrator rights, `src\01-core.ps1` relaunches
 `powershell.exe` with `-sta -NoProfile -ExecutionPolicy Bypass -File` and
 forwards `-nogui`, `-lang`, `-option`, `-shadow`, `-createuser` and `-noclean`.
 The original console exits as soon as the elevated window is created. If UAC is

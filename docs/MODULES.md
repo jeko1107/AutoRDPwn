@@ -10,9 +10,8 @@ and `Invoke-ARCleanup`, which run from the `finally` block on exit. Actions that
 pull a file back write it under `%LOCALAPPDATA%\AutoRDPwn\loot\` on the operator
 and delete the remote copy.
 
-Actions 205 to 207 and 801 to 805 are implemented in `src\30-attacks.ps1`; 901
-to 904 and 504 in `src\40-modules.ps1`. Read the handler before scripting
-against it.
+Actions 205 to 207, 801 to 805, 901 to 904 and 504 are implemented in
+`src\02-actions.ps1`. Read the handler before scripting against it.
 
 ## Quick actions
 

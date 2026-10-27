@@ -6,7 +6,7 @@ same function; there is no VNC binary in either path.
 
 ## Entry and preflight
 
-`Invoke-ARAttackQuickScreen` (`src\30-attacks.ps1`) does the following:
+`Invoke-ARAttackQuickScreen` (`src\02-actions.ps1`) does the following:
 
 1. Checks TCP 5985 on the target with `Assert-ARPort`; a closed port aborts the
    action before anything is staged.

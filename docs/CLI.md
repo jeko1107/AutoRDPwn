@@ -1,7 +1,7 @@
 # Command line
 
 `AutoRDPwn.ps1` is a PowerShell script, so it takes its switches through the
-normal `param()` block in `src\00-header.ps1`. Every sample below assumes the
+normal `param()` block in `src\01-core.ps1`. Every sample below assumes the
 repository root as the working directory.
 
 ```powershell
@@ -73,7 +73,7 @@ runs from a console that is already elevated, or add `-noadmin`.
 
 ## `-option` semantics
 
-`-option` accepts a catalog id. `Resolve-ARSelection` in `src\10-tui.ps1` maps
+`-option` accepts a catalog id. `Resolve-ARSelection` in `src\01-core.ps1` maps
 the value, so the legacy aliases `11` to `17` work as well
 (`101`, `201`, `301`, `401`, `501`, `601`, `701`), and any other value that is
 not a catalog id is reported as `Unknown option: <value>`.
@@ -88,7 +88,7 @@ is `localhost` and the user is the current operator account.
 
 Everything else about startup still runs in `-option` mode: the language is
 resolved, the last profile is restored, `-shadow` is applied to `Mode`, and
-`Invoke-ARCleanup` runs from the `finally` block in `src\50-main.ps1`.
+`Invoke-ARCleanup` runs from the `finally` block in `src\03-main.ps1`.
 
 ## Exit codes
 
@@ -103,8 +103,8 @@ resolved, the last profile is restored, `-shadow` is applied to `Mode`, and
 | `1` | `-Config` names a file that does not exist: `Config file not found: <path>`. |
 | `1` | `-Config` points at malformed JSON: `Malformed JSON in config file.`. |
 | `1` | `-List` or `-ListJson` could not read the catalog: `Action catalog not available.`. |
-| `1` | The action threw. `Invoke-ARAction` stores the message in `$script:ARLastFailure` and `src\50-main.ps1` exits 1. |
-| `1` | An unhandled exception reached the top-level `catch` in `src\50-main.ps1`. |
+| `1` | The action threw. `Invoke-ARAction` stores the message in `$script:ARLastFailure` and `src\03-main.ps1` exits 1. |
+| `1` | An unhandled exception reached the top-level `catch` in `src\03-main.ps1`. |
 
 All failures go to standard output with the `[!]` prefix of `Write-ARError`
 except the three header checks, which print their own red `[!]` line. Check

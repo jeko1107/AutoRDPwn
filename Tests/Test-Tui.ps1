@@ -1,8 +1,10 @@
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$tuiPath = Join-Path $root 'src\10-tui.ps1'
-. $tuiPath
+$tuiPath = Join-Path $root 'src\01-core.ps1'
+# 01-core carries the header at the top; -noadmin keeps Test-Tui from relaunching
+# itself elevated when the harness is run from a normal console.
+. $tuiPath -noadmin
 
 Import-ARLanguage -Path (Join-Path $root 'Resources\Languages\English.ps1') -AsFallback
 Import-ARLanguage -Path (Join-Path $root 'Resources\Languages\English.ps1')

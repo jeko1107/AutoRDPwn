@@ -1,6 +1,6 @@
 # Tests\Runtime.Tests.ps1
 #
-# Structural contracts in src\20-runtime.ps1. Both are read with the AST, so the
+# Structural contracts in src\01-core.ps1. Both are read with the AST, so the
 # tests stay valid while the runtime is rewritten: they assert that the work is
 # still reachable, not that it is written in one particular way.
 
@@ -9,7 +9,7 @@ Describe 'cleanup' {
     $function = Get-ArFunctionAst -Name 'Invoke-ARCleanup'
 
     It 'defines Invoke-ARCleanup in src' {
-        Assert-NotNull $function 'Invoke-ARCleanup is not defined in any src\*.ps1; the finally block in 50-main.ps1 would fail'
+        Assert-NotNull $function 'Invoke-ARCleanup is not defined in any src\*.ps1; the finally block in 03-main.ps1 would fail'
     }
 
     if ($null -ne $function) {

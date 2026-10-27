@@ -9,11 +9,11 @@
 #      never grep).
 #   3. locale: every Get-ARText key referenced by src resolves in
 #      English.ps1, and all seven language files share the same key set.
-#   4. CLI: src\00-header.ps1 declares Target, User, Password, Mode, Yes,
+#   4. CLI: src\01-core.ps1 declares Target, User, Password, Mode, Yes,
 #      Config, List and ListJson in its param block.
 #   5. no dead handlers: every Invoke-ARAttack* / Invoke-ARModule* function
-#      defined in src\30-attacks.ps1 or src\40-modules.ps1 is referenced by
-#      at least one catalog -Handler.
+#      defined in src\02-actions.ps1 is referenced by at least one catalog
+#      -Handler.
 #   6. cleanup: the thirteen wave-2 handlers remove C:\Windows\Temp paths
 #      only inside a finally block, or the artifact went through one of the
 #      registered cleanup lists ($script:ARRemoteTempDirs,
@@ -76,19 +76,19 @@ function Get-ArWave2Definitions {
 # The ids at the center of wave 2, in contract order, with the file each
 # handler is expected to land in (ownership, not an assertion).
 $script:ArWave2Targets = @(
-    [pscustomobject]@{ Id = '205'; Handler = 'Invoke-ARAttackLsassDump';       Owner = 'src\30-attacks.ps1' }
-    [pscustomobject]@{ Id = '206'; Handler = 'Invoke-ARAttackSamDump';         Owner = 'src\30-attacks.ps1' }
-    [pscustomobject]@{ Id = '207'; Handler = 'Invoke-ARAttackCredentialSpray'; Owner = 'src\30-attacks.ps1' }
-    [pscustomobject]@{ Id = '504'; Handler = 'Invoke-ARModulePersistenceKit';  Owner = 'src\40-modules.ps1' }
-    [pscustomobject]@{ Id = '801'; Handler = 'Invoke-ARAttackEnableRdp';       Owner = 'src\30-attacks.ps1' }
-    [pscustomobject]@{ Id = '802'; Handler = 'Invoke-ARAttackDefenderExclude'; Owner = 'src\30-attacks.ps1' }
-    [pscustomobject]@{ Id = '803'; Handler = 'Invoke-ARAttackAmsiBypass';      Owner = 'src\30-attacks.ps1' }
-    [pscustomobject]@{ Id = '804'; Handler = 'Invoke-ARAttackShadowCopies';    Owner = 'src\30-attacks.ps1' }
-    [pscustomobject]@{ Id = '805'; Handler = 'Invoke-ARAttackEventLogClear';   Owner = 'src\30-attacks.ps1' }
-    [pscustomobject]@{ Id = '901'; Handler = 'Invoke-ARModuleFileExfil';       Owner = 'src\40-modules.ps1' }
-    [pscustomobject]@{ Id = '902'; Handler = 'Invoke-ARModuleScreenshotLoop';  Owner = 'src\40-modules.ps1' }
-    [pscustomobject]@{ Id = '903'; Handler = 'Invoke-ARModuleClipboardWatch';  Owner = 'src\40-modules.ps1' }
-    [pscustomobject]@{ Id = '904'; Handler = 'Invoke-ARModuleKeyloggerFast';   Owner = 'src\40-modules.ps1' }
+    [pscustomobject]@{ Id = '205'; Handler = 'Invoke-ARAttackLsassDump';       Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '206'; Handler = 'Invoke-ARAttackSamDump';         Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '207'; Handler = 'Invoke-ARAttackCredentialSpray'; Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '504'; Handler = 'Invoke-ARModulePersistenceKit';  Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '801'; Handler = 'Invoke-ARAttackEnableRdp';       Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '802'; Handler = 'Invoke-ARAttackDefenderExclude'; Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '803'; Handler = 'Invoke-ARAttackAmsiBypass';      Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '804'; Handler = 'Invoke-ARAttackShadowCopies';    Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '805'; Handler = 'Invoke-ARAttackEventLogClear';   Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '901'; Handler = 'Invoke-ARModuleFileExfil';       Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '902'; Handler = 'Invoke-ARModuleScreenshotLoop';  Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '903'; Handler = 'Invoke-ARModuleClipboardWatch';  Owner = 'src\02-actions.ps1' }
+    [pscustomobject]@{ Id = '904'; Handler = 'Invoke-ARModuleKeyloggerFast';   Owner = 'src\02-actions.ps1' }
 )
 
 # Wave 2 adds exactly txt163..txt175 to the languages. A missing or extra key
@@ -451,7 +451,7 @@ Describe 'wave2 locale keys' {
         $regressionKeys = @($missingRefKeys | Where-Object { -not (Test-ArWave2TextKey -Key $_) })
         if ($regressionKeys.Count -eq 0) {
             It-Skip -Name 'resolves every Get-ARText key referenced by src in English.ps1' `
-                -Reason ('English.ps1 does not define wave2 keys that src already references ({0}); the tui worker, which owns src\10-tui.ps1 and the languages, has not landed them yet' -f ($missingRefKeys -join ', '))
+                -Reason ('English.ps1 does not define wave2 keys that src already references ({0}); the tui worker, which owns src\01-core.ps1 and the languages, has not landed them yet' -f ($missingRefKeys -join ', '))
         }
         else {
             It 'resolves every Get-ARText key referenced by src in English.ps1' {
@@ -508,14 +508,14 @@ Describe 'wave2 locale keys' {
 
 Describe 'wave2 CLI switches' {
 
-    $headerPath = Join-Path $script:ArTestRoot 'src\00-header.ps1'
+    $headerPath = Join-Path $script:ArTestRoot 'src\01-core.ps1'
     $requiredSwitches = @('Target', 'User', 'Password', 'Mode', 'Yes', 'Config', 'List', 'ListJson')
 
-    It 'parses src\00-header.ps1 with zero errors' {
-        Assert-FileExists -Path $headerPath -Message 'src\00-header.ps1 is required to reach its param block'
+    It 'parses src\01-core.ps1 with zero errors' {
+        Assert-FileExists -Path $headerPath -Message 'src\01-core.ps1 is required to reach its param block'
         $errors = @(Get-ArParseErrors -Path $headerPath)
         if ($errors.Count -eq 0) { return }
-        $details = @($errors | ForEach-Object { '00-header.ps1:{0}: {1}' -f $_.Extent.StartLineNumber, $_.Message }) -join '; '
+        $details = @($errors | ForEach-Object { '01-core.ps1:{0}: {1}' -f $_.Extent.StartLineNumber, $_.Message }) -join '; '
         throw ('the header does not parse, so the switch contract cannot be read from its AST: ' + $details)
     }
 
@@ -531,12 +531,12 @@ Describe 'wave2 CLI switches' {
 
     if ($absentSwitches.Count -eq $requiredSwitches.Count) {
         It-Skip -Name 'declares the wave2 CLI switches' `
-            -Reason ('src\00-header.ps1 declares none of {0}; the cli worker has not landed the param block switches yet' -f ($requiredSwitches -join ', '))
+            -Reason ('src\01-core.ps1 declares none of {0}; the cli worker has not landed the param block switches yet' -f ($requiredSwitches -join ', '))
     }
     else {
         It 'declares the wave2 CLI switches (Target, User, Password, Mode, Yes, Config, List, ListJson)' {
             if ($absentSwitches.Count -eq 0) { return }
-            throw (Format-ArAssertion -Message ('src\00-header.ps1 param block (declared at line {0}) is missing wave2 CLI switches' -f $paramBlockLine) `
+            throw (Format-ArAssertion -Message ('src\01-core.ps1 param block (declared at line {0}) is missing wave2 CLI switches' -f $paramBlockLine) `
                 -Expected (($requiredSwitches | Sort-Object) -join ', ') `
                 -Actual (($declaredSwitches | Sort-Object) -join ', ') `
                 -Detail ('missing: ' + ($absentSwitches -join ', ')))
@@ -550,11 +550,11 @@ Describe 'wave2 CLI switches' {
 
 Describe 'wave2 dead handlers' {
 
-    It 'wires every Invoke-ARAttack* and Invoke-ARModule* in 30-attacks and 40-modules to a catalog -Handler' {
+    It 'wires every Invoke-ARAttack* and Invoke-ARModule* in 02-actions to a catalog -Handler' {
         $wired = @(@(Get-ArCatalogEntries) | ForEach-Object { [string]$_.Handler } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         $dead = New-Object System.Collections.ArrayList
         foreach ($source in @(Get-ArSourceAsts)) {
-            if ($source.File -ne '30-attacks.ps1' -and $source.File -ne '40-modules.ps1') { continue }
+            if ($source.File -ne '02-actions.ps1') { continue }
             foreach ($function in @($source.Ast.FindAll({
                 param($node)
                 ($node -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and

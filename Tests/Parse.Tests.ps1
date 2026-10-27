@@ -10,9 +10,9 @@ Describe 'parse' {
     $sources = @($files | Where-Object { $_.RelativePath -like 'src\*' })
 
     It 'repo contains the expected source parts' {
-        $expected = @('00-header.ps1', '10-tui.ps1', '20-runtime.ps1', '30-attacks.ps1', '40-modules.ps1', '50-main.ps1')
+        $expected = @('01-core.ps1', '02-actions.ps1', '03-main.ps1')
         Assert-SetEqual -Expected $expected -Actual @($sources | ForEach-Object { $_.Name }) `
-            -Message 'src\ does not contain the six build parts; Build.ps1 will fail'
+            -Message 'src\ does not contain the three build parts; Build.ps1 will fail'
     }
 
     foreach ($file in $files) {

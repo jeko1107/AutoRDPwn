@@ -1,4 +1,4 @@
-function Show-ARLineLanguagePicker {
+﻿function Show-ARLineLanguagePicker {
     $languages = @('English', 'Spanish', 'French', 'German', 'Italian', 'Russian', 'Portuguese')
     Write-Host ''
     for ($index = 0; $index -lt $languages.Count; $index++) {

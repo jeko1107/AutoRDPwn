@@ -5,12 +5,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $parts = @(
-    'src\00-header.ps1',
-    'src\10-tui.ps1',
-    'src\20-runtime.ps1',
-    'src\30-attacks.ps1',
-    'src\40-modules.ps1',
-    'src\50-main.ps1'
+    'src\01-core.ps1',
+    'src\02-actions.ps1',
+    'src\03-main.ps1'
 )
 if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path $root 'AutoRDPwn.ps1' }
 if (-not [System.IO.Path]::IsPathRooted($OutputPath)) { $OutputPath = Join-Path $root $OutputPath }
