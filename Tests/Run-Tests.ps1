@@ -77,6 +77,15 @@ Write-Host 'Catalog checks' -ForegroundColor Cyan
 . (Join-Path $root 'src\10-tui.ps1')
 Import-ARLanguage -Path (Join-Path $root 'Resources\Languages\English.ps1') -AsFallback
 Import-ARLanguage -Path (Join-Path $root 'Resources\Languages\English.ps1')
+$script:ARRoot = $root
+$script:ARLocal = $true
+$script:ARTools = Join-Path $root 'Resources\Tools'
+. (Join-Path $root 'src\20-runtime.ps1')
+function Test-ARFunctionScriptLoad {
+    . (Get-ARResourcePath 'Resources\Scripts\Invoke-StealthScreen.ps1')
+    return [bool](Get-Command Invoke-StealthScreen -ErrorAction SilentlyContinue)
+}
+Check-True -Condition (Test-ARFunctionScriptLoad) -Name 'function scripts load in the caller scope'
 $catalog = @(Get-ARActionCatalog)
 $actions = @($catalog | Where-Object { $_.Kind -eq 'Action' })
 $groups = @($catalog | Where-Object { $_.Kind -eq 'Group' })

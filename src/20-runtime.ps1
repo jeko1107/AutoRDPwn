@@ -40,12 +40,6 @@ function Get-ARResourcePath {
     return $localPath
 }
 
-function Import-ARFunctionScript {
-    param([Parameter(Mandatory = $true)][string]$RelativePath)
-    $path = Get-ARResourcePath $RelativePath
-    Import-Module -Name $path -Force -DisableNameChecking -ErrorAction Stop
-}
-
 function Import-ARToolScript {
     param([Parameter(Mandatory = $true)][string]$RelativePath)
     $path = Get-ARResourcePath $RelativePath

