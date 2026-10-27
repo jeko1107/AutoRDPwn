@@ -1,138 +1,213 @@
-$ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $PSScriptRoot
-$failures = 0
-$checks = 0
+# Tests\Run-Tests.ps1
+#
+# AutoRDPwn test runner. No module dependency, no network, no elevation, no
+# catalog action is executed.
+#
+# Build gate: the suite compiles src\ through Build.ps1 with an explicit
+# -OutputPath under _sandbox\. Build.ps1 without -OutputPath overwrites the
+# versioned AutoRDPwn.ps1, which is exactly the work this suite exists to protect.
+#
+# Usage:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\Tests\Run-Tests.ps1
+#   pwsh -NoProfile -File .\Tests\Run-Tests.ps1
+#   .\Tests\Run-Tests.ps1 -Filter 'Catalog*' -Detailed
+#
+# Exit code: 0 when nothing failed, 1 otherwise. Skips (drift warnings) do not
+# change the exit code.
 
-function Check-True {
-    param([bool]$Condition, [string]$Name)
-    $script:checks++
-    if ($Condition) { Write-Host ('PASS  ' + $Name) -ForegroundColor Green }
-    else { $script:failures++; Write-Host ('FAIL  ' + $Name) -ForegroundColor Red }
-}
-
-function Check-Equal {
-    param($Actual, $Expected, [string]$Name)
-    Check-True -Condition ($Actual -eq $Expected) -Name $Name
-}
-
-function Test-Parser {
-    param([string]$Path)
-    $tokens = $null
-    $errors = $null
-    [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors) | Out-Null
-    return @($errors)
-}
-
-Write-Host 'TUI checks' -ForegroundColor Cyan
-$tuiOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'Tests\Test-Tui.ps1') 2>&1
-$tuiOutput | ForEach-Object { Write-Host $_ }
-Check-Equal -Actual $LASTEXITCODE -Expected 0 -Name 'TUI test suite exits cleanly'
-Check-True -Condition (($tuiOutput -join "`n") -match '53 checks, 0 failure') -Name 'TUI test suite reports 53 passing checks'
-
-Write-Host 'Parser checks' -ForegroundColor Cyan
-$sourceParts = @(
-    'src\00-header.ps1',
-    'src\10-tui.ps1',
-    'src\20-runtime.ps1',
-    'src\30-attacks.ps1',
-    'src\40-modules.ps1',
-    'src\50-main.ps1'
+[CmdletBinding()]
+param(
+    [string]$Filter = '*',
+    [switch]$Detailed,
+    [switch]$NoBuild
 )
-foreach ($part in $sourceParts) {
-    $path = Join-Path $root $part
-    Check-True -Condition (Test-Path -LiteralPath $path) -Name ('source exists: ' + $part)
-    $errors = Test-Parser -Path $path
-    Check-Equal -Actual $errors.Count -Expected 0 -Name ('parser clean: ' + $part)
-}
-foreach ($language in Get-ChildItem -LiteralPath (Join-Path $root 'Resources\Languages') -Filter '*.ps1') {
-    $errors = Test-Parser -Path $language.FullName
-    Check-Equal -Actual $errors.Count -Expected 0 -Name ('parser clean: ' + $language.Name)
-}
-$stealthScreenPath = Join-Path $root 'Resources\Scripts\Invoke-StealthScreen.ps1'
-$errors = Test-Parser -Path $stealthScreenPath
-Check-Equal -Actual $errors.Count -Expected 0 -Name 'parser clean: Invoke-StealthScreen.ps1'
 
-Write-Host 'Build checks' -ForegroundColor Cyan
-$buildOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'Build.ps1') 2>&1
-$buildOutput | ForEach-Object { Write-Host $_ }
-Check-Equal -Actual $LASTEXITCODE -Expected 0 -Name 'build exits cleanly'
-$generated = Join-Path $root 'AutoRDPwn.ps1'
-Check-True -Condition (Test-Path -LiteralPath $generated) -Name 'generated file exists'
-$errors = Test-Parser -Path $generated
-Check-Equal -Actual $errors.Count -Expected 0 -Name 'generated file parses cleanly'
-$generatedText = Get-Content -LiteralPath $generated -Raw
-Check-True -Condition ($generatedText.Length -gt 100000) -Name 'generated file keeps the full payload'
-Check-True -Condition ($generatedText -notmatch 'Write-ARText') -Name 'no stale Write-ARText references'
-Check-True -Condition ($generatedText -notmatch 'ExclusionProcess') -Name 'Defender process exclusions are not used'
-Check-True -Condition ($generatedText -match '\$script:ARHashUserName') -Name 'Pass-the-Hash tracks its temporary account'
-Check-True -Condition ($generatedText -notmatch 'ARHashUserCreated') -Name 'Pass-the-Hash does not use the old account flag'
-Check-True -Condition ($generatedText -match '\$remoteMsi\s*=\s*Copy-ARFileToTarget') -Name 'RDPWrap uses the copied MSI path'
-Check-True -Condition ($generatedText -match 'AutoRDPwnVnc_') -Name 'VNC server stages its payload on the target'
-Check-True -Condition ($generatedText -match '\$script:ARRemoteTempDirs\.Add') -Name 'remote temporary directories are tracked'
-Check-True -Condition ($generatedText -match 'AutoRDPwn_') -Name 'remote background jobs are tagged for cleanup'
-$stealthText = Get-Content -LiteralPath $stealthScreenPath -Raw
-Check-True -Condition ($stealthText -notmatch 'ExclusionProcess') -Name 'Stealth Screen does not add a process exclusion'
+$ErrorActionPreference = 'Stop'
+$script:ArTestRoot = Split-Path -Parent $PSScriptRoot
+$script:ArTestSandbox = Join-Path $script:ArTestRoot '_sandbox'
+$script:ArTestGenPath = Join-Path $script:ArTestSandbox 'gen.ps1'
 
-Write-Host 'Catalog checks' -ForegroundColor Cyan
-. (Join-Path $root 'src\10-tui.ps1')
-Import-ARLanguage -Path (Join-Path $root 'Resources\Languages\English.ps1') -AsFallback
-Import-ARLanguage -Path (Join-Path $root 'Resources\Languages\English.ps1')
-$script:ARRoot = $root
-$script:ARLocal = $true
-$script:ARTools = Join-Path $root 'Resources\Tools'
-. (Join-Path $root 'src\20-runtime.ps1')
-function Test-ARFunctionScriptLoad {
-    . (Get-ARResourcePath 'Resources\Scripts\Invoke-StealthScreen.ps1')
-    return [bool](Get-Command Invoke-StealthScreen -ErrorAction SilentlyContinue)
-}
-Check-True -Condition (Test-ARFunctionScriptLoad) -Name 'function scripts load in the caller scope'
-$catalog = @(Get-ARActionCatalog)
-$actions = @($catalog | Where-Object { $_.Kind -eq 'Action' })
-$groups = @($catalog | Where-Object { $_.Kind -eq 'Group' })
-Check-Equal -Actual $actions.Count -Expected 34 -Name 'catalog exposes 34 actions'
-Check-Equal -Actual $groups.Count -Expected 7 -Name 'catalog exposes 7 groups'
-$ids = @($actions | ForEach-Object { $_.Id })
-Check-Equal -Actual @($ids | Sort-Object -Unique).Count -Expected 34 -Name 'action IDs are unique'
-$byId = @{}
-foreach ($action in $actions) { $byId[$action.Id] = $action }
-Check-Equal -Actual $byId['401'].NeedsTarget -Expected $false -Name 'RDP caching is marked local-only for target'
-Check-Equal -Actual $byId['401'].NeedsSession -Expected $false -Name 'RDP caching is marked local-only for session'
-Check-True -Condition ($byId['104'].Description -match 'target listens') -Name 'netcat direct description matches target bind'
-Check-True -Condition ($byId['105'].Description -match 'target connects back') -Name 'netcat reverse description matches target callback'
-$handlerNames = @($actions | ForEach-Object { $_.Handler } | Sort-Object -Unique)
-$missingHandlers = @()
-foreach ($handler in $handlerNames) {
-    if ($generatedText -notmatch ('(?m)^\s*function\s+' + [regex]::Escape($handler) + '\b')) { $missingHandlers += $handler }
-}
-Check-Equal -Actual $missingHandlers.Count -Expected 0 -Name 'every catalog handler is defined'
-Check-True -Condition ($generatedText -match '(?m)^\s*function\s+Start-ARApplication\b') -Name 'main entry point is present'
-Check-True -Condition ($generatedText -match '(?m)^\s*function\s+Invoke-ARShadowEngine\b') -Name 'shadow engine is present'
+. (Join-Path $PSScriptRoot 'TestKit.ps1')
+. (Join-Path $PSScriptRoot 'ArAst.ps1')
 
-Write-Host 'Language checks' -ForegroundColor Cyan
-$languageFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'Resources\Languages') -Filter '*.ps1')
-$languageSets = @{}
-foreach ($language in $languageFiles) {
-    $keys = @(Select-String -Path $language.FullName -Pattern '^\s*\$txt(\d+)\s*=' | ForEach-Object { 'txt' + $_.Matches[0].Groups[1].Value })
-    $languageSets[$language.Name] = $keys
-    Check-Equal -Actual $keys.Count -Expected 136 -Name ('language has 136 text keys: ' + $language.Name)
-    Check-True -Condition ($keys -contains 'txt125') -Name ('language has txt125: ' + $language.Name)
-    Check-True -Condition ($keys -contains 'txt126') -Name ('language has txt126: ' + $language.Name)
-    Check-True -Condition ($keys -contains 'txt130') -Name ('language has txt130: ' + $language.Name)
+$totalClock = [System.Diagnostics.Stopwatch]::StartNew()
+$failed = 0
+
+function Write-Section {
+    param([string]$Text, [string]$Color = 'Cyan')
+    Write-Host ''
+    Write-Host $Text -ForegroundColor $Color
 }
-$englishKeys = $languageSets['English.ps1']
-foreach ($languageName in $languageSets.Keys) {
-    $difference = @(Compare-Object $englishKeys $languageSets[$languageName])
-    Check-Equal -Actual $difference.Count -Expected 0 -Name ('language keys match English: ' + $languageName)
+
+# --------------------------------------------------------------------------- #
+# header
+# --------------------------------------------------------------------------- #
+
+$hostLabel = 'PowerShell ' + $PSVersionTable.PSVersion.ToString()
+if ($PSVersionTable.ContainsKey('PSEdition')) { $hostLabel = $hostLabel + ' (' + $PSVersionTable.PSEdition + ')' }
+$pester = Get-Module -ListAvailable Pester -ErrorAction SilentlyContinue |
+    Sort-Object Version -Descending | Select-Object -First 1
+if ($null -eq $pester) {
+    $pesterLabel = 'not installed (built-in engine)'
 }
-$tuiText = Get-Content -LiteralPath (Join-Path $root 'src\10-tui.ps1') -Raw
-$runtimeText = Get-Content -LiteralPath (Join-Path $root 'src\20-runtime.ps1') -Raw
-$attackText = Get-Content -LiteralPath (Join-Path $root 'src\30-attacks.ps1') -Raw
-$moduleText = Get-Content -LiteralPath (Join-Path $root 'src\40-modules.ps1') -Raw
-$references = @([regex]::Matches(($tuiText + $runtimeText + $attackText + $moduleText), "Get-ARText\s+'?(txt\d+)") | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
-$missingKeys = @($references | Where-Object { $englishKeys -notcontains $_ })
-Check-Equal -Actual $missingKeys.Count -Expected 0 -Name 'every referenced text key exists in English'
+else {
+    $pesterLabel = '{0} available, unused (built-in engine: Pester < 4 has no -Skip)' -f $pester.Version
+}
 
 Write-Host ''
-Write-Host ('{0} checks, {1} failure(s)' -f $checks, $failures) -ForegroundColor $(if ($failures -eq 0) { 'Green' } else { 'Red' })
-if ($failures -gt 0) { exit 1 }
+Write-Host 'AutoRDPwn test suite' -ForegroundColor White
+Write-Host ('  root   ' + $script:ArTestRoot) -ForegroundColor DarkGray
+Write-Host ('  host   ' + $hostLabel) -ForegroundColor DarkGray
+Write-Host ('  pester ' + $pesterLabel) -ForegroundColor DarkGray
+
+# --------------------------------------------------------------------------- #
+# build gate - always into _sandbox
+# --------------------------------------------------------------------------- #
+
+if (-not (Test-Path -LiteralPath $script:ArTestSandbox)) {
+    $null = New-Item -ItemType Directory -Path $script:ArTestSandbox -Force
+}
+
+if ($NoBuild) {
+    Write-Host ('  build  reused ' + $script:ArTestGenPath + ' (-NoBuild)') -ForegroundColor DarkGray
+}
+else {
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $buildOutput = @(& (Join-Path $script:ArTestRoot 'Build.ps1') -OutputPath $script:ArTestGenPath *>&1 |
+            ForEach-Object { [string]$_ })
+        $clock.Stop()
+        $size = 0
+        if (Test-Path -LiteralPath $script:ArTestGenPath) { $size = (Get-Item -LiteralPath $script:ArTestGenPath).Length }
+        Add-ArTestResult -Group 'build' -Name 'compiles src into _sandbox\gen.ps1' -Status 'Pass' -Milliseconds $clock.ElapsedMilliseconds
+        Write-Host ('  build  _sandbox\gen.ps1 ({0} bytes)' -f $size) -ForegroundColor DarkGray
+    }
+    catch {
+        $clock.Stop()
+        $tail = ''
+        if ($buildOutput) { $tail = ($buildOutput | Select-Object -Last 5) -join ' | ' }
+        Add-ArTestResult -Group 'build' -Name 'compiles src into _sandbox\gen.ps1' -Status 'Fail' `
+            -Message ($_.Exception.Message + $(if ($tail) { ' [' + $tail + ']' } else { '' })) -Milliseconds $clock.ElapsedMilliseconds
+        Write-Host '  build  FAILED' -ForegroundColor Red
+    }
+}
+
+# --------------------------------------------------------------------------- #
+# test files
+# --------------------------------------------------------------------------- #
+
+$testFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.Tests.ps1' -File |
+    Where-Object { $_.Name -like $Filter } |
+    Sort-Object Name)
+
+if ($testFiles.Count -eq 0) {
+    Add-ArTestResult -Group 'runner' -Name 'discovers test files' -Status 'Fail' -Message ('no *.Tests.ps1 matched filter ''' + $Filter + '''')
+}
+else {
+    foreach ($file in $testFiles) {
+        try {
+            . $file.FullName
+        }
+        catch {
+            Add-ArTestResult -Group 'runner' -Name ('loads ' + $file.Name) -Status 'Fail' `
+                -Message ('the test file threw while loading, no test in it ran: ' + $_.Exception.Message)
+        }
+    }
+}
+
+# --------------------------------------------------------------------------- #
+# legacy TUI suite (existing file, runs in its own process)
+# --------------------------------------------------------------------------- #
+
+$tuiPath = Join-Path $PSScriptRoot 'Test-Tui.ps1'
+if ((Test-Path -LiteralPath $tuiPath) -and ($Filter -eq '*')) {
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    $hostExe = 'powershell.exe'
+    try { $hostExe = (Get-Process -Id $PID).Path } catch { }
+    $tuiOutput = @()
+    $tuiExit = 1
+    try {
+        $tuiOutput = @(& $hostExe -NoProfile -ExecutionPolicy Bypass -File $tuiPath 2>&1 | ForEach-Object { [string]$_ })
+        $tuiExit = $LASTEXITCODE
+    }
+    catch {
+        $tuiOutput = @($_.Exception.Message)
+    }
+    $clock.Stop()
+    $summary = @($tuiOutput | Where-Object { $_ -match 'checks,.*failure' } | Select-Object -Last 1)
+    if ($tuiExit -eq 0 -and $summary) {
+        Add-ArTestResult -Group 'legacy' -Name 'TUI suite (Test-Tui.ps1)' -Status 'Pass' -Milliseconds $clock.ElapsedMilliseconds
+        Write-Host ('  legacy ' + $summary) -ForegroundColor DarkGray
+    }
+    else {
+        $tail = ($tuiOutput | Select-Object -Last 6) -join ' | '
+        Add-ArTestResult -Group 'legacy' -Name 'TUI suite (Test-Tui.ps1)' -Status 'Fail' `
+            -Message ('exit code ' + $tuiExit + ': ' + $tail) -Milliseconds $clock.ElapsedMilliseconds
+    }
+}
+
+# --------------------------------------------------------------------------- #
+# report
+# --------------------------------------------------------------------------- #
+
+$results = @(Get-ArTestResults)
+$failed = @($results | Where-Object { $_.Status -eq 'Fail' }).Count
+$skipped = @($results | Where-Object { $_.Status -eq 'Skip' }).Count
+$passed = @($results | Where-Object { $_.Status -eq 'Pass' }).Count
+$totalClock.Stop()
+
+$groups = @($results | ForEach-Object { $_.Group } | Select-Object -Unique)
+
+foreach ($group in $groups) {
+    $groupResults = @($results | Where-Object { $_.Group -eq $group })
+    $groupPassed = @($groupResults | Where-Object { $_.Status -eq 'Pass' }).Count
+    $groupFailed = @($groupResults | Where-Object { $_.Status -eq 'Fail' }).Count
+    $groupSkipped = @($groupResults | Where-Object { $_.Status -eq 'Skip' }).Count
+
+    $counts = New-Object System.Collections.ArrayList
+    if ($groupPassed -gt 0) { $null = $counts.Add(('{0} passed' -f $groupPassed)) }
+    if ($groupFailed -gt 0) { $null = $counts.Add(('{0} failed' -f $groupFailed)) }
+    if ($groupSkipped -gt 0) { $null = $counts.Add(('{0} skipped' -f $groupSkipped)) }
+    $color = 'Green'
+    if ($groupFailed -gt 0) { $color = 'Red' }
+    elseif ($groupSkipped -gt 0) { $color = 'Yellow' }
+    Write-Section ('{0} ({1})' -f $group, ($counts -join ', ')) $color
+
+    foreach ($result in $groupResults) {
+        if ($Detailed -or $result.Status -eq 'Fail') {
+            if ($result.Status -eq 'Pass') { $statusColor = 'DarkGreen' } else { $statusColor = 'Red' }
+            Write-Host ('  {0}  {1} ({2} ms)' -f $result.Status.ToUpperInvariant().PadRight(4), $result.Name, $result.Milliseconds) -ForegroundColor $statusColor
+        }
+        # Skips carry a long reason; they get their own section below.
+        if ($result.Status -eq 'Fail' -and $result.Message) {
+            foreach ($line in ($result.Message -split [Environment]::NewLine)) {
+                Write-Host ('        ' + $line) -ForegroundColor Red
+            }
+        }
+    }
+}
+
+if ($skipped -gt 0) {
+    Write-Section 'warnings (skipped, not failures)' 'Yellow'
+    foreach ($result in @($results | Where-Object { $_.Status -eq 'Skip' })) {
+        Write-Host ('  [{0}] {1}' -f $result.Group, $result.Name) -ForegroundColor Yellow
+        foreach ($line in ($result.Message -split [Environment]::NewLine)) {
+            Write-Host ('        ' + $line) -ForegroundColor DarkYellow
+        }
+    }
+}
+
+if ($failed -gt 0) {
+    Write-Section ('{0} failing test(s)' -f $failed) 'Red'
+    foreach ($result in @($results | Where-Object { $_.Status -eq 'Fail' })) {
+        Write-Host ('  [{0}] {1}' -f $result.Group, $result.Name) -ForegroundColor Red
+    }
+}
+
+Write-Section ('{0} passed, {1} failed, {2} skipped in {3:n2}s' -f $passed, $failed, $skipped, $totalClock.Elapsed.TotalSeconds) `
+    $(if ($failed -eq 0) { 'Green' } else { 'Red' })
+
+Clear-ArTestTempDirectories
+
+if ($failed -gt 0) { exit 1 }
 exit 0

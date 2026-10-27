@@ -1,3 +1,12 @@
 _sandbox/
 Resources/Tools/*
 !Resources/Tools/.gitignore
+
+# Local orchestration and checkpoint files. These carry the QA target address,
+# credentials and the operator's local paths, so they never reach the remote.
+STATE.md
+TODO.md
+AGENTS.MD
+opencode.json
+.opencode/
+OpenCode Infinite.bat

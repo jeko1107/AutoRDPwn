@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$noadmin,
     [switch]$nogui,
     [string]$lang = '',
@@ -13,7 +13,7 @@ $ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Off
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
-$script:ARVersion = '5.2'
+$script:ARVersion = '6.0'
 $script:ARIsWindows = ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT)
 $script:ARNoAdmin = [bool]$noadmin
 $script:ARNoGui = [bool]$nogui
@@ -23,6 +23,17 @@ $script:ARLanguageArgument = [string]$lang
 $script:ARShadowPreference = ([string]$shadow).Trim().ToLowerInvariant()
 $script:ARInvokedFromOption = -not [string]::IsNullOrWhiteSpace($option)
 $script:AROptionValue = ([string]$option).Trim()
+
+# Bound-but-empty -option and stray positional/unknown tokens used to fall through to
+# interactive mode or into $args; both are argument errors and must fail loudly.
+if ($PSBoundParameters.ContainsKey('option') -and [string]::IsNullOrWhiteSpace($option)) {
+    Write-Host '[!] -option requires a value, for example: -option 8' -ForegroundColor Red
+    exit 1
+}
+if ($args.Count -gt 0) {
+    Write-Host ('[!] Unknown argument: ' + ($args -join ' ')) -ForegroundColor Red
+    exit 1
+}
 $script:AROriginalLocation = (Get-Location).Path
 
 $script:ARLocal = $false
@@ -103,7 +114,7 @@ if ($script:ARIsWindows -and -not $script:ARNoAdmin -and -not (Test-ARHeaderAdmi
 }
 
 try {
-    $Host.UI.RawUI.WindowTitle = 'AutoRDPwn - v5.2 - by @JoelGMSec'
+    $Host.UI.RawUI.WindowTitle = 'AutoRDPwn - v6.0 - by jeko'
     $Host.UI.RawUI.BackgroundColor = 'Black'
     $Host.UI.RawUI.ForegroundColor = 'Gray'
 } catch { }

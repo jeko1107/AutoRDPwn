@@ -1,3 +1,18 @@
+# Versión 6.0
+• Ruta de pantalla reescrita: servidor de frames JPEG en la sesión interactiva del objetivo y visor WinForms en el operador, que descarga los fotogramas por HTTP en el puerto 8081
+• Sin inyección de DLL en el objetivo y sin conexión inversa: el objetivo ya no marca hacia el atacante
+• La regla de firewall se crea antes de abrir el listener, para que Windows no muestre su aviso en la víctima, y se borra al terminar
+• Teardown en bloque finally: tarea programada, script provisional, fichero de parada, regla de firewall y proceso del servidor
+• La opción 702 (VNC legacy) pasa a ejecutar Quick Screen y se retira del código la ruta VNC antigua
+• La limpieza restaura los valores de registro que escribe el motor Shadow, a partir de una copia del estado previo a cada escritura
+• La limpieza desinstala por código de producto los MSI que se hayan instalado durante la ejecución
+• Las credenciales guardadas con cmdkey se borran siempre, también con -noclean, igual que las exclusiones de Defender y los directorios de trabajo
+• Se eliminan las reglas de firewall registradas (Powershell Remote Control Application y Powershell Web Server) y se resetean los portproxy del operador
+• Nuevo informe de limpieza: cuenta los pasos fallidos y muestra hasta cinco antes de continuar
+• -option devuelve código de salida 1 cuando la acción falla o el identificador no existe
+• Un -option vacío y cualquier argumento desconocido salen con código 1, en vez de caer al modo interactivo o a $args
+
+
 # Versión 5.2 (fork)
 • Nueva opción 8 en el menú: Quick Screen (Stealth VNC), acceso directo al módulo Stealth Screen
 • Soporte del parámetro -ViewOnly en modo view: ver la pantalla remota sin enviar input

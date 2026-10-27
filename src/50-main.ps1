@@ -13,7 +13,12 @@ function Show-ARLineLanguagePicker {
 }
 
 function Start-ARApplication {
+    if (Get-Command Get-ARLastLanguage -ErrorAction SilentlyContinue) {
+        try { $savedLanguage = Get-ARLastLanguage } catch { $savedLanguage = '' }
+        if ($savedLanguage -and -not $script:ARLanguageArgument) { $script:ARLanguageArgument = $savedLanguage }
+    }
     Initialize-ARLanguage $script:ARLanguageArgument
+    $null = Restore-ARLastProfile
     if ($script:ARShadowPreference -in @('see', 'view', 'ver', 'regarder', 'siehe', 'vedere')) {
         $script:ARTarget['Mode'] = 'view'
     }
@@ -26,10 +31,13 @@ function Start-ARApplication {
     if ($script:ARInvokedFromOption) {
         $selection = Resolve-ARSelection $script:AROptionValue
         if ($selection -like 'ACTION:*') {
+            $script:ARLastFailure = ''
             Invoke-ARAction $selection.Substring(7)
+            if ($script:ARLastFailure) { exit 1 }
             return
         }
-        throw ('Unknown option: ' + $script:AROptionValue)
+        Write-ARError ('Unknown option: ' + $script:AROptionValue)
+        exit 1
     }
 
     while ($true) {
@@ -61,6 +69,7 @@ try {
 }
 catch {
     Write-ARError $_.Exception.Message
+    exit 1
 }
 finally {
     Invoke-ARCleanup

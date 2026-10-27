@@ -1,0 +1,43 @@
+name: tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    name: suite (${{ matrix.name }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-powershell-5.1
+            exe: powershell
+          - name: powershell-7
+            exe: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show host
+        shell: cmd
+        run: ${{ matrix.exe }} -NoProfile -Command $PSVersionTable.PSVersion
+
+      - name: Run test suite
+        shell: cmd
+        # -File keeps the exit code; the runner returns 1 when a test fails.
+        run: ${{ matrix.exe }} -NoProfile -ExecutionPolicy Bypass -File .\Tests\Run-Tests.ps1
+
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-${{ matrix.name }}
+          path: _sandbox/gen.ps1
+          if-no-files-found: ignore
+          retention-days: 7

