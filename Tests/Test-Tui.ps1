@@ -165,6 +165,11 @@ $joined = $script:ARTestBuffer -join "`n"
 Assert-True -Condition ($joined -match '\[101\]') -Name 'line menu lists remote access actions'
 Assert-True -Condition ($joined -match '\[704\]') -Name 'line menu lists the last action'
 
+$script:ARSelectedId = ''
+$script:ARTestBuffer.Clear()
+$defaultTuiResult = Show-ARTui
+Assert-Equal -Actual $defaultTuiResult -Expected 'TEST' -Name 'TUI opens without an initial action id'
+
 $script:ARTestMode = $false
 $script:ARTestWidth = 0
 $script:ARTestHeight = 0

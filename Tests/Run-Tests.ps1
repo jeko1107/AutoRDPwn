@@ -27,7 +27,7 @@ Write-Host 'TUI checks' -ForegroundColor Cyan
 $tuiOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'Tests\Test-Tui.ps1') 2>&1
 $tuiOutput | ForEach-Object { Write-Host $_ }
 Check-Equal -Actual $LASTEXITCODE -Expected 0 -Name 'TUI test suite exits cleanly'
-Check-True -Condition (($tuiOutput -join "`n") -match '44 checks, 0 failure') -Name 'TUI test suite reports 44 passing checks'
+Check-True -Condition (($tuiOutput -join "`n") -match '45 checks, 0 failure') -Name 'TUI test suite reports 45 passing checks'
 
 Write-Host 'Parser checks' -ForegroundColor Cyan
 $sourceParts = @(

@@ -303,7 +303,8 @@ function Get-ARActionCatalog {
 }
 
 function Get-ARActionById {
-    param([Parameter(Mandatory = $true)][string]$Id)
+    param([string]$Id = '')
+    if ([string]::IsNullOrWhiteSpace($Id)) { return $null }
     foreach ($item in Get-ARActionCatalog) {
         if ($item.Kind -eq 'Action' -and $item.Id -eq $Id) {
             return $item
