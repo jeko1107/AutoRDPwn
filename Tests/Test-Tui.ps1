@@ -102,6 +102,8 @@ Assert-Equal -Actual (Resolve-ARSelection '603') -Expected 'ACTION:603' -Name 's
 Assert-Equal -Actual (Resolve-ARSelection 'q') -Expected 'QUIT' -Name 'selection q quits'
 Assert-Equal -Actual (Resolve-ARSelection 'l') -Expected 'LANGUAGE' -Name 'selection l opens language picker'
 Assert-Equal -Actual (Resolve-ARSelection 't') -Expected 'TARGET' -Name 'selection t opens target editor'
+Assert-Equal -Actual (Resolve-ARSelection 'p') -Expected 'PROFILES' -Name 'selection p opens saved targets'
+Assert-Equal -Actual (Resolve-ARSelection 's') -Expected 'SAVE' -Name 'selection s saves the current target'
 Assert-Equal -Actual (Resolve-ARSelection '999') -Expected '' -Name 'unknown selection is rejected'
 
 $filtered = @(Get-ARFilteredCatalog -Filter 'mimikatz' | Where-Object { $_.Kind -eq 'Action' })
@@ -116,6 +118,45 @@ Assert-True -Condition (@($wrapped | Where-Object { $_.Length -gt 40 }).Count -e
 $formatted = Format-ARText -Text ('x' * 200) -MaxWidth 40
 Assert-True -Condition ($formatted.Length -le 40) -Name 'formatter truncates to width'
 Assert-True -Condition ($formatted.EndsWith('...')) -Name 'formatter marks truncation'
+
+$profileDirectory = Join-Path $root '_sandbox'
+if (-not (Test-Path -LiteralPath $profileDirectory)) {
+    New-Item -ItemType Directory -Path $profileDirectory -Force | Out-Null
+}
+$profilePath = Join-Path $profileDirectory ('targets-test-' + [guid]::NewGuid().ToString('N') + '.json')
+$script:ARTargetProfilesPath = $profilePath
+$script:ARTarget['Computer'] = '192.0.2.10'
+$script:ARTarget['User'] = 'analyst'
+$script:ARTarget['Password'] = 'ProfileSecret!'
+$script:ARTarget['Hash'] = '0123456789abcdef0123456789abcdef'
+$script:ARTarget['Domain'] = 'LAB'
+$script:ARTarget['AttackerIP'] = '192.0.2.50'
+$script:ARTarget['Mode'] = 'view'
+$savedProfileName = Save-ARTargetProfile -Name 'lab-target'
+$savedProfiles = @(Get-ARTargetProfiles)
+Assert-Equal -Actual $savedProfileName -Expected 'lab-target' -Name 'target profile saves with the requested name'
+Assert-Equal -Actual $savedProfiles.Count -Expected 1 -Name 'target profile store returns one entry'
+Assert-True -Condition ($savedProfiles[0].PasswordProtected -ne 'ProfileSecret!') -Name 'target profile password is protected on disk'
+Assert-True -Condition ($savedProfiles[0].HashProtected -ne $script:ARTarget['Hash']) -Name 'target profile hash is protected on disk'
+$script:ARTarget['Computer'] = 'localhost'
+$script:ARTarget['User'] = ''
+$script:ARTarget['Password'] = ''
+$script:ARTarget['Hash'] = ''
+$script:ARTarget['Domain'] = ''
+$script:ARTarget['AttackerIP'] = ''
+$script:ARTarget['Mode'] = 'control'
+$null = Apply-ARTargetProfile $savedProfiles[0]
+Assert-Equal -Actual $script:ARTarget['Computer'] -Expected '192.0.2.10' -Name 'target profile restores the host'
+Assert-Equal -Actual $script:ARTarget['Password'] -Expected 'ProfileSecret!' -Name 'target profile restores the password'
+Remove-Item -LiteralPath $profilePath -Force -ErrorAction SilentlyContinue
+$script:ARTargetProfilesPath = ''
+$script:ARTarget['Computer'] = 'localhost'
+$script:ARTarget['User'] = ''
+$script:ARTarget['Password'] = ''
+$script:ARTarget['Hash'] = ''
+$script:ARTarget['Domain'] = ''
+$script:ARTarget['AttackerIP'] = ''
+$script:ARTarget['Mode'] = 'control'
 
 $script:ARTestMode = $true
 $script:ARNoClear = $true

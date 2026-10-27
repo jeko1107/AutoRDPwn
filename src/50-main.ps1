@@ -37,6 +37,8 @@ function Start-ARApplication {
             $selection = Show-ARLineMenu
             if ([string]::IsNullOrWhiteSpace($selection) -or $selection -eq 'QUIT') { break }
             if ($selection -eq 'TARGET') { Show-ARLineTargetForm; continue }
+            if ($selection -eq 'PROFILES') { $null = Show-ARLineTargetPicker; continue }
+            if ($selection -eq 'SAVE') { $null = Save-ARCurrentTarget; continue }
             if ($selection -eq 'LANGUAGE') { Show-ARLineLanguagePicker; continue }
             if ($selection -like 'ACTION:*') { Invoke-ARAction $selection.Substring(7); continue }
             Set-ARStatus (Get-ARText 'txt6' 'Incorrect option, try again') 'Warn'

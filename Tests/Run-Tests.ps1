@@ -27,7 +27,7 @@ Write-Host 'TUI checks' -ForegroundColor Cyan
 $tuiOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'Tests\Test-Tui.ps1') 2>&1
 $tuiOutput | ForEach-Object { Write-Host $_ }
 Check-Equal -Actual $LASTEXITCODE -Expected 0 -Name 'TUI test suite exits cleanly'
-Check-True -Condition (($tuiOutput -join "`n") -match '45 checks, 0 failure') -Name 'TUI test suite reports 45 passing checks'
+Check-True -Condition (($tuiOutput -join "`n") -match '53 checks, 0 failure') -Name 'TUI test suite reports 53 passing checks'
 
 Write-Host 'Parser checks' -ForegroundColor Cyan
 $sourceParts = @(
@@ -114,7 +114,7 @@ $languageSets = @{}
 foreach ($language in $languageFiles) {
     $keys = @(Select-String -Path $language.FullName -Pattern '^\s*\$txt(\d+)\s*=' | ForEach-Object { 'txt' + $_.Matches[0].Groups[1].Value })
     $languageSets[$language.Name] = $keys
-    Check-Equal -Actual $keys.Count -Expected 130 -Name ('language has 130 text keys: ' + $language.Name)
+    Check-Equal -Actual $keys.Count -Expected 136 -Name ('language has 136 text keys: ' + $language.Name)
     Check-True -Condition ($keys -contains 'txt125') -Name ('language has txt125: ' + $language.Name)
     Check-True -Condition ($keys -contains 'txt126') -Name ('language has txt126: ' + $language.Name)
     Check-True -Condition ($keys -contains 'txt130') -Name ('language has txt130: ' + $language.Name)

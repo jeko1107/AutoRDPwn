@@ -91,6 +91,32 @@ function Initialize-ARLanguage {
         }
     }
     Set-ARLanguageName $resolved
+    if (Get-Command Reset-ARActionCatalogCache -ErrorAction SilentlyContinue) {
+        Reset-ARActionCatalogCache
+    }
+}
+
+function Get-ARLocalIPv4 {
+    try {
+        $route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
+            Sort-Object RouteMetric, InterfaceMetric |
+            Select-Object -First 1
+        if ($route) {
+            $address = Get-NetIPAddress -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                Where-Object { $_.IPAddress -notlike '169.254.*' } |
+                Select-Object -First 1
+            if ($address) { return [string]$address.IPAddress }
+        }
+    }
+    catch { }
+    try {
+        $address = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.IPAddress -notlike '169.254.*' } |
+            Select-Object -First 1
+        if ($address) { return [string]$address.IPAddress }
+    }
+    catch { }
+    return ''
 }
 
 function Initialize-ARDefender {

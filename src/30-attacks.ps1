@@ -171,8 +171,14 @@ function Invoke-ARAttackQuickScreen {
     $password = Get-ARPlainPassword
     $attacker = [string]$script:ARTarget['AttackerIP']
     if ([string]::IsNullOrWhiteSpace($attacker)) {
-        if ($script:ARInvokedFromOption) { throw 'Quick Screen requires the attacker IP.' }
-        $attacker = Read-ARValue (Get-ARText 'txt123' 'Your IP for the reverse connection')
+        $localAddress = Get-ARLocalIPv4
+        if ($script:ARInvokedFromOption) {
+            if ([string]::IsNullOrWhiteSpace($localAddress)) { throw 'Quick Screen requires the attacker IP.' }
+            $attacker = $localAddress
+        }
+        else {
+            $attacker = Read-ARValue (Get-ARText 'txt123' 'Your IP for the reverse connection') $localAddress
+        }
     }
     $viewOnly = ([string]$script:ARTarget['Mode'] -eq 'view')
     $null = Get-ARResourcePath 'Resources\Scripts\Invoke-VNCViewer.ps1'

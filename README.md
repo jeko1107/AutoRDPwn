@@ -85,6 +85,9 @@ When the console is not running as Administrator, AutoRDPwn requests elevation w
 
 • Launch with **-noadmin** - keeps the menu in the current console, without elevation
 
+**Saved targets:**
+Press `P` to load a saved target profile and `S` to save the current target. Profiles keep the host, user, domain, attacker IP and mode, and are stored in `Resources\Tools\targets.json`; passwords and NTLM hashes are protected with Windows DPAPI and the file is ignored by git.
+
 **Local execution on one line:**
 ```
 powershell -ep bypass "cd $env:temp ; iwr https://raw.githubusercontent.com/jeko1107/AutoRDPwn/master/AutoRDPwn.ps1 -outfile AutoRDPwn.ps1 ; .\AutoRDPwn.ps1"

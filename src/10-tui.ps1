@@ -20,6 +20,14 @@ $script:ARNoClear = $false
 $script:ARTestWidth = 0
 $script:ARTestHeight = 0
 $script:ARTestBuffer = New-Object System.Collections.Generic.List[string]
+$script:ARActionCatalogCache = $null
+$script:ARTargetProfilesPath = ''
+$script:ARTuiFrameActive = $false
+$script:ARTuiFrameScreen = ''
+$script:ARTuiFrameWidth = 0
+$script:ARTuiFrameHeight = 0
+$script:ARTuiFrameLine = 0
+$script:ARAdminState = $null
 $script:ARLegacyMap = @{
     '11' = '101'
     '12' = '201'
@@ -190,6 +198,51 @@ function Clear-ARScreen {
     Clear-Host
 }
 
+function Start-ARTuiFrame {
+    param([string]$Screen = 'main')
+    if ($script:ARTestMode) { return }
+    try {
+        $width = Get-ARConsoleWidth
+        $height = Get-ARConsoleHeight
+        $needsClear = (-not $script:ARTuiFrameActive) -or
+            ($Screen -ne $script:ARTuiFrameScreen) -or
+            ($width -ne $script:ARTuiFrameWidth) -or
+            ($height -ne $script:ARTuiFrameHeight)
+        if ($needsClear) {
+            if (-not $script:ARNoClear) { Clear-Host }
+            $script:ARTuiFrameActive = $true
+            $script:ARTuiFrameScreen = $Screen
+            $script:ARTuiFrameWidth = $width
+            $script:ARTuiFrameHeight = $height
+        }
+        try { [Console]::CursorVisible = $false } catch { }
+        try {
+            [Console]::SetCursorPosition(0, 0)
+            $script:ARTuiFrameLine = 0
+        }
+        catch {
+            Clear-ARScreen
+            $script:ARTuiFrameActive = $false
+        }
+    }
+    catch {
+        Clear-ARScreen
+        $script:ARTuiFrameActive = $false
+    }
+}
+
+function Stop-ARTuiFrame {
+    if ($script:ARTestMode) { return }
+    try {
+        $row = [Math]::Min((Get-ARConsoleHeight) - 1, [Math]::Max(0, $script:ARTuiFrameLine))
+        [Console]::SetCursorPosition(0, $row)
+    }
+    catch { }
+    try { [Console]::CursorVisible = $true } catch { }
+    $script:ARTuiFrameActive = $false
+    $script:ARTuiFrameScreen = ''
+}
+
 function Write-ARLine {
     param(
         [AllowEmptyString()][string]$Text = '',
@@ -200,6 +253,13 @@ function Write-ARLine {
         $script:ARTestBuffer.Add($Text)
         return
     }
+    if ($script:ARTuiFrameActive) {
+        $width = $script:ARTuiFrameWidth - 1
+        if ($width -gt 0 -and $Text.Length -lt $width) {
+            $Text = $Text.PadRight($width)
+        }
+        $script:ARTuiFrameLine++
+    }
     if ($Background -ne '') {
         Write-Host $Text -ForegroundColor $Color -BackgroundColor $Background
     }
@@ -209,14 +269,16 @@ function Write-ARLine {
 }
 
 function Test-ARIsAdmin {
+    if ($null -ne $script:ARAdminState) { return $script:ARAdminState }
     try {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
         $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $script:ARAdminState = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     }
     catch {
-        return $false
+        $script:ARAdminState = $false
     }
+    return $script:ARAdminState
 }
 
 function New-ARAction {
@@ -247,7 +309,12 @@ function New-ARGroup {
     }
 }
 
+function Reset-ARActionCatalogCache {
+    $script:ARActionCatalogCache = $null
+}
+
 function Get-ARActionCatalog {
+    if ($null -ne $script:ARActionCatalogCache) { return $script:ARActionCatalogCache }
     $items = New-Object System.Collections.Generic.List[object]
 
     $items.Add((New-ARAction -Id '1' -Title 'PSexec (SMB)' -Description 'Copy and start the payload with PSexec over SMB, then open the shadow session.' -Handler 'Invoke-ARAttackPSexec' -NeedsSession $false))
@@ -299,7 +366,8 @@ function Get-ARActionCatalog {
     $items.Add((New-ARAction -Id '703' -Title (Get-ARText 'txt67' 'External script execution') -Description (Get-ARText 'txt119' 'Run any external PowerShell script or function on the target') -Handler 'Invoke-ARModuleExternalScript'))
     $items.Add((New-ARAction -Id '704' -Title (Get-ARText 'txt79' 'Change user with RunAs') -Description (Get-ARText 'txt120' 'Validate credentials and launch processes as another user') -Handler 'Invoke-ARModuleRunAs' -NeedsTarget $false -NeedsSession $false))
 
-    return $items.ToArray()
+    $script:ARActionCatalogCache = $items.ToArray()
+    return $script:ARActionCatalogCache
 }
 
 function Get-ARActionById {
@@ -350,6 +418,8 @@ function Resolve-ARSelection {
     if ($upper -in @('Q', 'QUIT', 'X', 'EXIT')) { return 'QUIT' }
     if ($upper -in @('L', 'LANG', 'LANGUAGE')) { return 'LANGUAGE' }
     if ($upper -in @('T', 'TARGET')) { return 'TARGET' }
+    if ($upper -in @('P', 'PROFILES', 'TARGETS')) { return 'PROFILES' }
+    if ($upper -in @('S', 'SAVE')) { return 'SAVE' }
     if ($value -match '^1[1-7]$') {
         $mapped = $script:ARLegacyMap[$value]
         if ($mapped) { return 'ACTION:' + $mapped }
@@ -432,7 +502,7 @@ function Show-ARTuiScreen {
     if ($script:ARScroll -gt $maxScroll) { $script:ARScroll = $maxScroll }
     if ($script:ARScroll -lt 0) { $script:ARScroll = 0 }
 
-    Clear-ARScreen
+    Start-ARTuiFrame -Screen 'main'
     $adminLabel = if (Test-ARIsAdmin) { 'yes' } else { 'no' }
     $header = 'AutoRDPwn v5.2  |  Shadow Attack Framework  |  {0}  |  admin: {1}' -f $script:ARLocaleName, $adminLabel
     Write-ARLine (Format-ARText $header $inner) 'Yellow'
@@ -495,7 +565,7 @@ function Show-ARTuiScreen {
         Write-ARLine (Format-ARText (' ' + $Prompt) $inner) 'Yellow'
     }
     else {
-        $footer = ' Up/Down move  Enter run  T target  / search  L language  F1 help  Q quit'
+        $footer = ' Up/Down move  Enter run  T target  P profiles  S save  / search  L language  F1 help  Q quit'
         if ($script:ARFilter -ne '') {
             $footer = ' Filter: ' + $script:ARFilter + '  |  Esc clear  | ' + $footer.Trim()
         }
@@ -514,6 +584,8 @@ function Show-ARHelp {
     Write-ARLine ' Home / End      jump to the first or last action' 'Gray'
     Write-ARLine ' Enter           run the selected action' 'Gray'
     Write-ARLine ' T               edit target, credentials and mode' 'Gray'
+    Write-ARLine ' P               load a saved target profile' 'Gray'
+    Write-ARLine ' S               save the current target profile' 'Gray'
     Write-ARLine ' /               filter actions by text' 'Gray'
     Write-ARLine ' L               change language' 'Gray'
     Write-ARLine ' Esc             clear the filter or close a dialog' 'Gray'
@@ -524,6 +596,215 @@ function Show-ARHelp {
     Write-ARLine ' Press any key to return' 'Green'
     if (-not $script:ARTestMode) {
         try { $null = [Console]::ReadKey($true) } catch { }
+    }
+}
+
+function Get-ARTargetProfilesPath {
+    if (-not [string]::IsNullOrWhiteSpace($script:ARTargetProfilesPath)) {
+        return $script:ARTargetProfilesPath
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:ARTools)) {
+        return (Join-Path $script:ARTools 'targets.json')
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:ARRoot)) {
+        return (Join-Path $script:ARRoot 'Resources\Tools\targets.json')
+    }
+    return (Join-Path (Get-Location).Path 'targets.json')
+}
+
+function Get-ARTargetProfiles {
+    $path = Get-ARTargetProfilesPath
+    if (-not (Test-Path -LiteralPath $path)) { return @() }
+    try {
+        $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
+        $data = $raw | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $data) { return @() }
+        return @($data)
+    }
+    catch { return @() }
+}
+
+function Protect-ARTargetSecret {
+    param([string]$Value = '')
+    if ([string]::IsNullOrEmpty($Value)) { return '' }
+    $secure = ConvertTo-SecureString -String $Value -AsPlainText -Force -ErrorAction Stop
+    return (ConvertFrom-SecureString -SecureString $secure -ErrorAction Stop)
+}
+
+function Unprotect-ARTargetSecret {
+    param([string]$Value = '')
+    if ([string]::IsNullOrEmpty($Value)) { return '' }
+    try {
+        $secure = ConvertTo-SecureString -String $Value -ErrorAction Stop
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+        try {
+            return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        }
+        finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        }
+    }
+    catch { return '' }
+}
+
+function Get-ARTargetProfileDefaultName {
+    $computer = [string]$script:ARTarget['Computer']
+    if ([string]::IsNullOrWhiteSpace($computer)) { $computer = 'localhost' }
+    $user = [string]$script:ARTarget['User']
+    if ([string]::IsNullOrWhiteSpace($user)) { return $computer }
+    return ($computer + ' - ' + $user)
+}
+
+function Save-ARTargetProfile {
+    param([string]$Name = '')
+    $profileName = $Name.Trim()
+    if ($profileName -eq '') { $profileName = Get-ARTargetProfileDefaultName }
+    $profiles = New-Object System.Collections.Generic.List[object]
+    foreach ($profile in @(Get-ARTargetProfiles)) {
+        if ([string]$profile.Name -ne $profileName) { $profiles.Add($profile) }
+    }
+    $profiles.Add([pscustomobject]@{
+        Name              = $profileName
+        Computer          = [string]$script:ARTarget['Computer']
+        User              = [string]$script:ARTarget['User']
+        PasswordProtected = Protect-ARTargetSecret ([string]$script:ARTarget['Password'])
+        HashProtected     = Protect-ARTargetSecret ([string]$script:ARTarget['Hash'])
+        Domain            = [string]$script:ARTarget['Domain']
+        AttackerIP        = [string]$script:ARTarget['AttackerIP']
+        Mode              = [string]$script:ARTarget['Mode']
+    })
+    $path = Get-ARTargetProfilesPath
+    $directory = Split-Path -Parent $path
+    if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+    $json = ConvertTo-Json -InputObject $profiles.ToArray() -Depth 3
+    Set-Content -LiteralPath $path -Value $json -Encoding UTF8 -ErrorAction Stop
+    return $profileName
+}
+
+function Apply-ARTargetProfile {
+    param($Profile)
+    if ($null -eq $Profile) { return $false }
+    foreach ($key in @('Computer', 'User', 'Domain', 'AttackerIP')) {
+        $property = $Profile.PSObject.Properties[$key]
+        if ($property) { $script:ARTarget[$key] = [string]$property.Value }
+    }
+    $modeProperty = $Profile.PSObject.Properties['Mode']
+    if ($modeProperty -and ([string]$modeProperty.Value -in @('control', 'view'))) {
+        $script:ARTarget['Mode'] = [string]$modeProperty.Value
+    }
+    $passwordProperty = $Profile.PSObject.Properties['PasswordProtected']
+    if ($passwordProperty) {
+        $script:ARTarget['Password'] = Unprotect-ARTargetSecret ([string]$passwordProperty.Value)
+    }
+    $hashProperty = $Profile.PSObject.Properties['HashProtected']
+    if ($hashProperty) {
+        $script:ARTarget['Hash'] = Unprotect-ARTargetSecret ([string]$hashProperty.Value)
+    }
+    return $true
+}
+
+function Save-ARCurrentTarget {
+    try {
+        $name = Save-ARTargetProfile
+        Set-ARStatus ((Get-ARText 'txt133' 'Target saved') + ': ' + $name) 'Ok'
+        return $true
+    }
+    catch {
+        Set-ARStatus ((Get-ARText 'txt135' 'Could not save target') + ': ' + $_.Exception.Message) 'Error'
+        return $false
+    }
+}
+
+function Show-ARTargetProfilesScreen {
+    param(
+        [object[]]$Profiles,
+        [int]$Index = 0
+    )
+    $width = Get-ARConsoleWidth
+    $height = Get-ARConsoleHeight
+    $inner = $width - 1
+    $listHeight = [Math]::Max(3, $height - 8)
+    if ($Index -lt 0) { $Index = 0 }
+    if ($Index -ge $Profiles.Count) { $Index = $Profiles.Count - 1 }
+    $scroll = 0
+    if ($Index -ge $listHeight) { $scroll = $Index - $listHeight + 1 }
+
+    Start-ARTuiFrame -Screen 'profiles'
+    Write-ARLine (Format-ARText (' ' + (Get-ARText 'txt136' 'Saved target profiles') + '  |  ' + $Profiles.Count) $inner) 'Yellow'
+    Write-ARLine ('-' * $inner) 'DarkGray'
+    for ($row = 0; $row -lt $listHeight; $row++) {
+        $profileIndex = $scroll + $row
+        if ($profileIndex -ge $Profiles.Count) {
+            Write-ARLine ''
+            continue
+        }
+        $profile = $Profiles[$profileIndex]
+        $name = [string]$profile.Name
+        if ([string]::IsNullOrWhiteSpace($name)) { $name = '(unnamed)' }
+        $hostName = [string]$profile.Computer
+        if ([string]::IsNullOrWhiteSpace($hostName)) { $hostName = 'localhost' }
+        $marker = if ($profileIndex -eq $Index) { '>' } else { ' ' }
+        $line = Format-ARText (' {0} {1,-28} {2}' -f $marker, $name, $hostName) $inner
+        if ($profileIndex -eq $Index) {
+            Write-ARLine $line 'Black' 'Gray'
+        }
+        else {
+            Write-ARLine $line 'Gray'
+        }
+    }
+    Write-ARLine ('-' * $inner) 'DarkGray'
+    $selected = $Profiles[$Index]
+    $selectedUser = [string]$selected.User
+    if ([string]::IsNullOrWhiteSpace($selectedUser)) { $selectedUser = '(current user)' }
+    $selectedLine = ' {0}  |  user: {1}  |  mode: {2}' -f $selected.Computer, $selectedUser, $selected.Mode
+    Write-ARLine (Format-ARText $selectedLine $inner) 'White'
+    Write-ARLine (Format-ARText (' ' + (Get-ARText 'txt123' 'Your IP for the reverse connection') + ': ' + ([string]$selected.AttackerIP)) $inner) 'Gray'
+    Write-ARLine ' Up/Down move  Enter load  Esc cancel' 'DarkGray'
+}
+
+function Show-ARTargetPicker {
+    $profiles = @(Get-ARTargetProfiles)
+    if ($profiles.Count -eq 0) {
+        Set-ARStatus (Get-ARText 'txt132' 'No saved targets. Edit a target and press S to save it.') 'Warn'
+        return $false
+    }
+    $index = 0
+    for ($i = 0; $i -lt $profiles.Count; $i++) {
+        if ([string]$profiles[$i].Computer -eq [string]$script:ARTarget['Computer'] -and
+            [string]$profiles[$i].User -eq [string]$script:ARTarget['User']) {
+            $index = $i
+            break
+        }
+    }
+    while ($true) {
+        Show-ARTargetProfilesScreen -Profiles $profiles -Index $index
+        if ($script:ARTestMode) { return $false }
+        try { $key = [Console]::ReadKey($true) } catch { return $false }
+        switch ($key.Key) {
+            'UpArrow' {
+                $index--
+                if ($index -lt 0) { $index = $profiles.Count - 1 }
+            }
+            'DownArrow' {
+                $index++
+                if ($index -ge $profiles.Count) { $index = 0 }
+            }
+            'Home' { $index = 0 }
+            'End' { $index = $profiles.Count - 1 }
+            'Enter' {
+                $null = Apply-ARTargetProfile $profiles[$index]
+                Set-ARStatus ((Get-ARText 'txt134' 'Target loaded') + ': ' + [string]$profiles[$index].Name) 'Ok'
+                return $true
+            }
+            'Escape' { return $false }
+            default {
+                $character = $key.KeyChar.ToString().ToUpperInvariant()
+                if ($character -eq 'Q') { return $false }
+            }
+        }
     }
 }
 
@@ -540,7 +821,7 @@ function Show-ARTargetFormScreen {
         @{ Key = 'AttackerIP'; Label = 'Attacker IP' },
         @{ Key = 'Mode'; Label = 'Mode' }
     )
-    Clear-ARScreen
+    Start-ARTuiFrame -Screen 'target'
     Write-ARLine (Format-ARText (' Target editor  |  {0}' -f $script:ARLocaleName) $inner) 'Yellow'
     Write-ARLine ('-' * $inner) 'DarkGray'
     for ($i = 0; $i -lt $fields.Count; $i++) {
@@ -563,17 +844,32 @@ function Show-ARTargetFormScreen {
         }
     }
     Write-ARLine ('-' * $inner) 'DarkGray'
-    Write-ARLine ' Up/Down move  Enter edit  S save  Esc cancel' 'DarkGray'
+    $statusColor = switch ($script:ARStatus['Kind']) {
+        'Ok' { 'Green' }
+        'Warn' { 'Yellow' }
+        'Error' { 'Red' }
+        default { 'DarkGray' }
+    }
+    Write-ARLine (Format-ARText (' ' + $script:ARStatus['Text']) $inner) $statusColor
+    Write-ARLine ' Up/Down move  Enter edit  P profiles  S save  Esc cancel' 'DarkGray'
 }
 
 function Read-ARLineValue {
     param([string]$Prompt)
+    $restoreHidden = $script:ARTuiFrameActive
+    if ($restoreHidden) { try { [Console]::CursorVisible = $true } catch { } }
     Write-Host $Prompt -NoNewline -ForegroundColor Yellow
-    try { return $Host.UI.ReadLine() } catch { return $null }
+    try { return $Host.UI.ReadLine() }
+    catch { return $null }
+    finally {
+        if ($restoreHidden) { try { [Console]::CursorVisible = $false } catch { } }
+    }
 }
 
 function Read-ARSecretValue {
     param([string]$Prompt)
+    $restoreHidden = $script:ARTuiFrameActive
+    if ($restoreHidden) { try { [Console]::CursorVisible = $true } catch { } }
     Write-Host $Prompt -NoNewline -ForegroundColor Yellow
     try {
         $secure = $Host.UI.ReadLineAsSecureString()
@@ -587,6 +883,9 @@ function Read-ARSecretValue {
         }
     }
     catch { return '' }
+    finally {
+        if ($restoreHidden) { try { [Console]::CursorVisible = $false } catch { } }
+    }
 }
 
 function Edit-ARTargetField {
@@ -653,7 +952,8 @@ function Show-ARTargetForm {
             'Escape' { return $true }
             default {
                 $character = $key.KeyChar.ToString().ToUpperInvariant()
-                if ($character -eq 'S') { return $true }
+                if ($character -eq 'S') { $null = Save-ARCurrentTarget }
+                if ($character -eq 'P') { $null = Show-ARTargetPicker }
                 if ($character -eq 'Q') { return $false }
             }
         }
@@ -694,7 +994,7 @@ function Show-ARLanguagePicker {
     $index = [Array]::IndexOf($languages, $script:ARLocaleName)
     if ($index -lt 0) { $index = 0 }
     while ($true) {
-        Clear-ARScreen
+        Start-ARTuiFrame -Screen 'language'
         $width = Get-ARConsoleWidth
         $inner = $width - 1
         Write-ARLine ' Language' 'Yellow'
@@ -746,56 +1046,66 @@ function Show-ARTui {
         $script:ARSelectedId = $InitialId
     }
     $script:ARScroll = 0
-    while ($true) {
-        Show-ARTuiScreen
-        if ($script:ARTestMode) { return 'TEST' }
-        try { $key = [Console]::ReadKey($true) } catch { return 'QUIT' }
-        switch ($key.Key) {
-            'UpArrow' { Move-ARSelection -Delta -1 }
-            'DownArrow' { Move-ARSelection -Delta 1 }
-            'PageUp' { Move-ARSelectionPage -Pages -1 }
-            'PageDown' { Move-ARSelectionPage -Pages 1 }
-            'Home' {
-                $first = Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' } | Select-Object -First 1
-                if ($first) { $script:ARSelectedId = $first.Id; $script:ARScroll = 0 }
-            }
-            'End' {
-                $last = Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' } | Select-Object -Last 1
-                if ($last) { $script:ARSelectedId = $last.Id }
-            }
-            'Enter' { return ('ACTION:' + $script:ARSelectedId) }
-            'Escape' {
-                if ($script:ARFilter -ne '') {
-                    $script:ARFilter = ''
-                    Set-ARStatus 'Filter cleared' 'Info'
+    if (-not $script:ARTestMode) {
+        try { [Console]::CursorVisible = $false } catch { }
+    }
+    try {
+        while ($true) {
+            Show-ARTuiScreen
+            if ($script:ARTestMode) { return 'TEST' }
+            try { $key = [Console]::ReadKey($true) } catch { return 'QUIT' }
+            switch ($key.Key) {
+                'UpArrow' { Move-ARSelection -Delta -1 }
+                'DownArrow' { Move-ARSelection -Delta 1 }
+                'PageUp' { Move-ARSelectionPage -Pages -1 }
+                'PageDown' { Move-ARSelectionPage -Pages 1 }
+                'Home' {
+                    $first = Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' } | Select-Object -First 1
+                    if ($first) { $script:ARSelectedId = $first.Id; $script:ARScroll = 0 }
                 }
-            }
-            'F1' { Show-ARHelp }
-            default {
-                $character = $key.KeyChar.ToString().ToUpperInvariant()
-                if ($character -eq 'Q' -or $character -eq 'X') { return 'QUIT' }
-                if ($character -eq 'T') {
-                    if (Show-ARTargetForm) { Set-ARStatus 'Target updated' 'Ok' }
+                'End' {
+                    $last = Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' } | Select-Object -Last 1
+                    if ($last) { $script:ARSelectedId = $last.Id }
                 }
-                if ($character -eq 'L') { return 'LANGUAGE' }
-                if ($character -eq '/') {
-                    Show-ARTuiScreen -Prompt 'Filter:'
-                    try { $filterValue = $Host.UI.ReadLine() } catch { $filterValue = $null }
-                    if ($null -ne $filterValue) {
-                        $script:ARFilter = $filterValue.Trim()
-                        if ($script:ARFilter -ne '') {
-                            $rows = @(Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' })
-                            if ($rows.Count -gt 0) { $script:ARSelectedId = $rows[0].Id; $script:ARScroll = 0 }
-                            else { Set-ARStatus 'No action matches the filter' 'Warn' }
-                        }
+                'Enter' { return ('ACTION:' + $script:ARSelectedId) }
+                'Escape' {
+                    if ($script:ARFilter -ne '') {
+                        $script:ARFilter = ''
+                        Set-ARStatus 'Filter cleared' 'Info'
                     }
                 }
-                if ($character -eq 'R') {
-                    $script:ARFilter = ''
-                    Set-ARStatus 'Filter cleared' 'Info'
+                'F1' { Show-ARHelp }
+                default {
+                    $character = $key.KeyChar.ToString().ToUpperInvariant()
+                    if ($character -eq 'Q' -or $character -eq 'X') { return 'QUIT' }
+                    if ($character -eq 'T') {
+                        if (Show-ARTargetForm) { Set-ARStatus 'Target updated' 'Ok' }
+                    }
+                    if ($character -eq 'P') { $null = Show-ARTargetPicker }
+                    if ($character -eq 'S') { $null = Save-ARCurrentTarget }
+                    if ($character -eq 'L') { return 'LANGUAGE' }
+                    if ($character -eq '/') {
+                        Show-ARTuiScreen -Prompt 'Filter:'
+                        try { $filterValue = $Host.UI.ReadLine() } catch { $filterValue = $null }
+                        if ($null -ne $filterValue) {
+                            $script:ARFilter = $filterValue.Trim()
+                            if ($script:ARFilter -ne '') {
+                                $rows = @(Get-ARFilteredCatalog -Filter $script:ARFilter | Where-Object { $_.Kind -eq 'Action' })
+                                if ($rows.Count -gt 0) { $script:ARSelectedId = $rows[0].Id; $script:ARScroll = 0 }
+                                else { Set-ARStatus 'No action matches the filter' 'Warn' }
+                            }
+                        }
+                    }
+                    if ($character -eq 'R') {
+                        $script:ARFilter = ''
+                        Set-ARStatus 'Filter cleared' 'Info'
+                    }
                 }
             }
         }
+    }
+    finally {
+        Stop-ARTuiFrame
     }
 }
 
@@ -817,7 +1127,7 @@ function Show-ARLineMenu {
         Write-ARLine (Format-ARText ('       {0}' -f $item.Description) $inner) 'DarkGray'
     }
     Write-ARLine ''
-    Write-ARLine ' [L] language  [T] target  [Q] quit' 'DarkGray'
+    Write-ARLine ' [L] language  [T] target  [P] profiles  [S] save target  [Q] quit' 'DarkGray'
     if ($script:ARTestMode) { return '' }
     $selection = Read-ARLineValue ' Choose an action:'
     if ($null -eq $selection) { return 'QUIT' }
@@ -829,4 +1139,35 @@ function Show-ARLineTargetForm {
     Write-ARLine 'Target editor (line mode)' 'Yellow'
     Read-ARLineTargetForm
     Set-ARStatus 'Target updated' 'Ok'
+}
+
+function Show-ARLineTargetPicker {
+    $profiles = @(Get-ARTargetProfiles)
+    if ($profiles.Count -eq 0) {
+        Write-ARWarn (Get-ARText 'txt132' 'No saved targets. Edit a target and press S to save it.')
+        return $false
+    }
+    Clear-ARScreen
+    Write-ARLine (Get-ARText 'txt136' 'Saved target profiles') 'Yellow'
+    Write-ARLine ('-' * ((Get-ARConsoleWidth) - 1)) 'DarkGray'
+    for ($index = 0; $index -lt $profiles.Count; $index++) {
+        $profile = $profiles[$index]
+        $name = [string]$profile.Name
+        if ([string]::IsNullOrWhiteSpace($name)) { $name = '(unnamed)' }
+        Write-ARLine (' {0}. {1}  [{2}]' -f ($index + 1), $name, $profile.Computer) 'Gray'
+    }
+    Write-ARLine ('-' * ((Get-ARConsoleWidth) - 1)) 'DarkGray'
+    $choice = Read-ARValue ('Target profile (1-' + $profiles.Count + ')') '1'
+    if ($choice -notmatch '^\d+$') {
+        Write-ARWarn (Get-ARText 'txt6' 'Incorrect option, try again')
+        return $false
+    }
+    $selectedIndex = [int]$choice - 1
+    if ($selectedIndex -lt 0 -or $selectedIndex -ge $profiles.Count) {
+        Write-ARWarn (Get-ARText 'txt6' 'Incorrect option, try again')
+        return $false
+    }
+    $null = Apply-ARTargetProfile $profiles[$selectedIndex]
+    Set-ARStatus ((Get-ARText 'txt134' 'Target loaded') + ': ' + [string]$profiles[$selectedIndex].Name) 'Ok'
+    return $true
 }
