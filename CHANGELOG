@@ -1,3 +1,13 @@
+# Versión 6.0 — wave 3a (acceso a credenciales)
+• Diez acciones nuevas en el catálogo, dentro del grupo "Passwords and hashes": 220 WDigest plaintext logon, 221 Credential Manager vault, 222 Browser saved passwords, 223 Wi-Fi keys in clear, 224 DPAPI master keys, 225 LSA secrets (SECURITY hive), 226 SSH private keys, 227 Kerberos ticket cache, 228 Token privileges y 229 Cached domain logons
+• El catálogo pasa de 47 a 57 acciones; sólo 227 declara -NeedsSession $true y las otras nueve trabajan contra el objetivo sin sesión
+• Claves de idioma nuevas: txt184 a txt193, con el mismo juego de 193 claves en los siete ficheros, BOM y CRLF conservados
+• 220 es la única que cambia estado en el objetivo a propósito (UseLogonCredential bajo WDigest, con efecto en el siguiente inicio de sesión); las otras nueve sólo leen: vaultcmd, Login Data y Local State de los navegadores, perfiles de wlan con key=clear, claves maestras DPAPI, colmenas SECURITY y SYSTEM, claves privadas SSH, caché Kerberos con klist, whoami /priv y el contador de inicios de sesión en caché de Winlogon
+• 205, 206 y 225 se solapan a propósito: 205 es un minidump en caliente, 206 guarda las tres colmenas y 225 sólo SECURITY y SYSTEM para secretsdump
+• docs\MODULES.md gana la sección 220-229 con la tabla id / acción / handler / qué necesita, y la nota de que sólo 227 abre sesión WinRM
+• Tests\Wave3.Tests.ps1 añade los contratos de los diez ids: entrada única en el catálogo, handler esperado, definición única en src\*.ps1, bloque contiguo 220-229, ningún id repetido, puerta de sesión correcta, clave de título resuelta en los siete idiomas y parse de src sin errores; Tests\Test-Tui.ps1 pasa a esperar 57 acciones
+
+
 # Versión 6.0 — wave 2
 • Trece acciones nuevas en el catálogo: 205 Lsass dump, 206 Sam dump, 207 Credential spray, 801 Enable RDP, 802 Defender exclusions, 803 AMSI bypass, 804 Shadow copies, 805 Event log clear, 901 File exfiltration, 902 Screenshot loop, 903 Clipboard watch, 904 Fast keylogger y 504 Persistence kit
 • El volcado de LSASS usa rundll32 con comsvcs.dll y descarga el .dmp al operador; el de SAM guarda las colmenas SAM, SYSTEM y SECURITY con reg save y las descarga igual

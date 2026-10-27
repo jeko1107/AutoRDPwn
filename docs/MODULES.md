@@ -1,7 +1,7 @@
 # Modules
 
 One section per catalog action, in catalog order, grouped by the category buckets
-that `Get-ARActionCategories` builds from the catalog. There are 47 actions.
+that `Get-ARActionCategories` builds from the catalog. There are 57 actions.
 
 Unless a section says otherwise, an action needs a target in the target editor
 and a working WinRM session (TCP 5985) to that target. "Leaves" lists what the
@@ -10,7 +10,7 @@ and `Invoke-ARCleanup`, which run from the `finally` block on exit. Actions that
 pull a file back write it under `%LOCALAPPDATA%\AutoRDPwn\loot\` on the operator
 and delete the remote copy.
 
-Actions 205 to 207, 801 to 805, 901 to 904 and 504 are implemented in
+Actions 205 to 207, 220 to 229, 801 to 805, 901 to 904 and 504 are implemented in
 `src\02-actions.ps1`. Read the handler before scripting against it.
 
 ## Quick actions
@@ -118,6 +118,29 @@ Actions 205 to 207, 801 to 805, 901 to 904 and 504 are implemented in
 - Needs: an elevated remote session, TCP 5985.
 - Runs: `reg save HKLM\SAM`, `HKLM\SYSTEM` and `HKLM\SECURITY` into `C:\Windows\Temp\W<8 hex>\<HIVE>.hiv`, then pulls every hive that saved to `%LOCALAPPDATA%\AutoRDPwn\loot\sam\<target>-<yyyyMMdd-HHmmss>\`.
 - Leaves: the remote directory, removed in a `finally`. A hive that `reg save` rejects is reported and skipped; the action only throws when all three fail. The local folder is the input for offline hash extraction.
+
+### 220-229. Credential access pack
+
+Ten actions that read credential material the target already holds. The "needs"
+column is the catalog gate: all ten need a target in the target editor, and only
+227 carries `-NeedsSession $true`.
+
+| id | action | handler | what it needs |
+| --- | --- | --- | --- |
+| 220 | WDigest plaintext logon | `Invoke-ARAttackWdigest` | target; administrative token to write under `HKLM`, no session |
+| 221 | Credential Manager vault | `Invoke-ARAttackVaultDump` | target; the logged-on user's own vault through `vaultcmd`, no session |
+| 222 | Browser saved passwords | `Invoke-ARAttackBrowserCredentials` | target; the `Login Data` and `Local State` files of the installed browsers, no session |
+| 223 | Wi-Fi keys in clear | `Invoke-ARAttackWifiKeys` | target; `netsh wlan export profile key=clear`, no session |
+| 224 | DPAPI master keys | `Invoke-ARAttackDpapiMasterKeys` | target; administrative token for the machine keys, no session |
+| 225 | LSA secrets (SECURITY hive) | `Invoke-ARAttackLsaSecrets` | target; administrative token to save the hives, no session |
+| 226 | SSH private keys | `Invoke-ARAttackSshKeys` | target; the profile directories the account can read, no session |
+| 227 | Kerberos ticket cache | `Invoke-ARAttackKerberosTickets` | target and a session; the LSA cache of the logged-on user |
+| 228 | Token privileges | `Invoke-ARAttackTokenPrivileges` | target; `whoami /priv` as the running account, no session |
+| 229 | Cached domain logons | `Invoke-ARAttackCachedLogons` | target; administrative token to read the `Winlogon` keys, no session |
+
+- Runs: each handler collects the material on the target and either prints it or pulls an archive to `%LOCALAPPDATA%\AutoRDPwn\loot\`; decryption and parsing happen offline on the operator.
+- Leaves: any remote working directory a handler creates is registered with the cleanup lists before use, so `Invoke-ARCleanup` removes it; read the handler for the exact path and for the registry or hive values it restores.
+- Note: 220 is the only row that changes target state on purpose (it turns on plaintext WDigest caching) and the only one whose payoff appears at the next logon. 205, 206 and 225 overlap on purpose: 205 is a live minidump, 206 keeps the three hives, 225 keeps only `SECURITY` and `SYSTEM` for `secretsdump`.
 
 ## Networking / Pivoting
 

@@ -2,7 +2,7 @@
 
 AutoRDPwn is a PowerShell post-exploitation framework for Windows. It automates
 the Shadow attack — a SYSTEM scheduled task that opens a console session on the
-remote host — and puts 47 actions behind one menu: remote execution, shells,
+remote host — and puts 57 actions behind one menu: remote execution, shells,
 credential extraction, pivoting, desktop forensics, persistence, collection and
 privilege escalation.
 
@@ -121,6 +121,16 @@ opens contextual help, `Q` or `X` quits.
 | 204 | Passwords and hashes | Recover Wi-Fi passwords |
 | 205 | Passwords and hashes | Lsass dump |
 | 206 | Passwords and hashes | Sam dump |
+| 220 | Passwords and hashes | WDigest plaintext logon |
+| 221 | Passwords and hashes | Credential Manager vault |
+| 222 | Passwords and hashes | Browser saved passwords |
+| 223 | Passwords and hashes | Wi-Fi keys in clear |
+| 224 | Passwords and hashes | DPAPI master keys |
+| 225 | Passwords and hashes | LSA secrets (SECURITY hive) |
+| 226 | Passwords and hashes | SSH private keys |
+| 227 | Passwords and hashes | Kerberos ticket cache |
+| 228 | Passwords and hashes | Token privileges |
+| 229 | Passwords and hashes | Cached domain logons |
 | 301 | Networking / Pivoting | TCP Port Scan |
 | 302 | Networking / Pivoting | Native Port Forwarding |
 | 303 | Networking / Pivoting | PowerShell Web Server |
