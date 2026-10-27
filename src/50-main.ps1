@@ -12,19 +12,114 @@ function Show-ARLineLanguagePicker {
     Set-ARStatus ('Language: ' + $name) 'Ok'
 }
 
+function Get-ARCatalogRows {
+    $rows = New-Object System.Collections.Generic.List[object]
+    if (-not (Get-Command Get-ARActionCatalog -ErrorAction SilentlyContinue)) {
+        return $rows.ToArray()
+    }
+    $group = Get-ARText 'txt137' 'Quick actions'
+    foreach ($item in @(Get-ARActionCatalog)) {
+        if ($null -eq $item) { continue }
+        $kind = ''
+        if ($item.PSObject.Properties['Kind']) { $kind = [string]$item.Kind }
+        if ($kind -eq 'Group') {
+            if ($item.PSObject.Properties['Title']) { $group = [string]$item.Title }
+            continue
+        }
+        $description = ''
+        if ($item.PSObject.Properties['Description']) { $description = [string]$item.Description }
+        $needsSession = $false
+        if ($item.PSObject.Properties['NeedsSession']) { $needsSession = [bool]$item.NeedsSession }
+        $rows.Add([pscustomobject]@{
+            Id           = [string]$item.Id
+            Title        = [string]$item.Title
+            Description  = $description
+            Handler      = [string]$item.Handler
+            NeedsSession = $needsSession
+            Group        = $group
+        })
+    }
+    return $rows.ToArray()
+}
+
 function Start-ARApplication {
+    param(
+        [switch]$List,
+        [switch]$ListJson
+    )
+
+    if ($script:ARConfigPath -ne '') {
+        if (-not (Test-Path -LiteralPath $script:ARConfigPath)) {
+            Write-ARError ('Config file not found: ' + $script:ARConfigPath)
+            exit 1
+        }
+        try {
+            $raw = Get-Content -LiteralPath $script:ARConfigPath -Raw -ErrorAction Stop
+            $config = $raw | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            Write-ARError 'Malformed JSON in config file.'
+            exit 1
+        }
+        if ($config) {
+            if (-not $PSBoundParameters.ContainsKey('Target') -and $config.PSObject.Properties['Target']) { $script:ARCliTarget = [string]$config.Target }
+            if (-not $PSBoundParameters.ContainsKey('User') -and $config.PSObject.Properties['User']) { $script:ARCliUser = [string]$config.User }
+            if (-not $PSBoundParameters.ContainsKey('Password') -and $config.PSObject.Properties['Password']) { $script:ARCliPassword = [string]$config.Password }
+            if (-not $PSBoundParameters.ContainsKey('Mode') -and $config.PSObject.Properties['Mode']) { $script:ARCliMode = [string]$config.Mode }
+            if (-not $PSBoundParameters.ContainsKey('lang') -and $config.PSObject.Properties['Language']) { $script:ARLanguageArgument = [string]$config.Language }
+            elseif (-not $PSBoundParameters.ContainsKey('lang') -and $config.PSObject.Properties['language']) { $script:ARLanguageArgument = [string]$config.language }
+        }
+    }
+
     if (Get-Command Get-ARLastLanguage -ErrorAction SilentlyContinue) {
         try { $savedLanguage = Get-ARLastLanguage } catch { $savedLanguage = '' }
         if ($savedLanguage -and -not $script:ARLanguageArgument) { $script:ARLanguageArgument = $savedLanguage }
     }
     Initialize-ARLanguage $script:ARLanguageArgument
+
+    # Pure output mode: nothing but the JSON document may reach stdout, and the
+    # catalog needs no profile, defender or target state, so it runs before any
+    # UI setup and skips the cleanup banner in the finally block.
+    if ($ListJson) {
+        if (-not (Get-Command Get-ARActionCatalog -ErrorAction SilentlyContinue)) {
+            Write-ARError 'Action catalog not available.'
+            exit 1
+        }
+        $catalogRows = @(Get-ARCatalogRows)
+        $script:ARCleanupDone = $true
+        ConvertTo-Json -InputObject $catalogRows -Depth 4
+        exit 0
+    }
+
     $null = Restore-ARLastProfile
+
+    if ($script:ARCliTarget -ne '') { $script:ARTarget['Computer'] = $script:ARCliTarget }
+    if ($script:ARCliUser -ne '') { $script:ARTarget['User'] = $script:ARCliUser }
+    if ($null -ne $script:ARCliPassword) {
+        $script:ARTarget['Password'] = [string]$script:ARCliPassword
+    }
+    if ($script:ARCliMode -ne '') {
+        $m = ([string]$script:ARCliMode).Trim().ToLowerInvariant()
+        if ($m -eq 'view') { $script:ARTarget['Mode'] = 'view' }
+        elseif ($m -eq 'control') { $script:ARTarget['Mode'] = 'control' }
+    }
     if ($script:ARShadowPreference -in @('see', 'view', 'ver', 'regarder', 'siehe', 'vedere')) {
         $script:ARTarget['Mode'] = 'view'
     }
     elseif ($script:ARShadowPreference -in @('control', 'controlar', 'controle', 'kontrolle', 'controllo')) {
         $script:ARTarget['Mode'] = 'control'
     }
+    if ($PSBoundParameters.ContainsKey('Yes')) { $script:ARAssumeYes = $true }
+
+    if ($List) {
+        if (Get-Command Get-ARActionCatalog -ErrorAction SilentlyContinue) {
+            Get-ARCatalogRows | Format-Table Id, Title, Handler, NeedsSession, Group -AutoSize
+            exit 0
+        }
+        Write-ARError 'Action catalog not available.'
+        exit 1
+    }
+
     Initialize-ARDefender
     Set-ARStatus 'Ready' 'Info'
 
@@ -65,7 +160,7 @@ function Start-ARApplication {
 }
 
 try {
-    Start-ARApplication
+    Start-ARApplication -List:$List -ListJson:$ListJson
 }
 catch {
     Write-ARError $_.Exception.Message

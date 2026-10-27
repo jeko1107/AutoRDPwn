@@ -282,6 +282,60 @@ function Get-ArContractRuleNameVariable {
     return $null
 }
 
+# Strict literal: a quoted string or a variable whose nearest assignment is one.
+# A name built at runtime (Get-ARText, $result.CreatedRules) returns $null so the
+# firewall contract can treat it as the runtime path instead of a missing literal.
+function Get-ArContractStaticName {
+    param($Ast, $Expression, [int]$Line, [int]$Depth = 0)
+    if ($null -eq $Expression) { return $null }
+    if ($Depth -gt 8) { return $null }
+
+    if ($Expression -is [System.Management.Automation.Language.CommandExpressionAst]) {
+        return (Get-ArContractStaticName -Ast $Ast -Expression $Expression.Expression -Line $Line -Depth ($Depth + 1))
+    }
+
+    if ($Expression -is [System.Management.Automation.Language.PipelineAst]) {
+        $elements = @($Expression.PipelineElements)
+        if ($elements.Count -ne 1) { return $null }
+        return (Get-ArContractStaticName -Ast $Ast -Expression $elements[0] -Line $Line -Depth ($Depth + 1))
+    }
+
+    if ($Expression -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+        return [string]$Expression.Value
+    }
+
+    if ($Expression -is [System.Management.Automation.Language.ConvertExpressionAst]) {
+        return (Get-ArContractStaticName -Ast $Ast -Expression $Expression.Child -Line $Line -Depth ($Depth + 1))
+    }
+
+    if ($Expression -is [System.Management.Automation.Language.VariableExpressionAst]) {
+        return (Get-ArContractStaticVariable -Ast $Ast -Name $Expression.VariablePath.UserPath -Line $Line -Depth ($Depth + 1))
+    }
+
+    return $null
+}
+
+function Get-ArContractStaticVariable {
+    param($Ast, [Parameter(Mandatory = $true)][string]$Name, [Parameter(Mandatory = $true)][int]$Line, [int]$Depth = 0)
+    if ($Depth -gt 8) { return $null }
+    $scope = Get-ArContractScope -Ast $Ast -Line $Line
+
+    $nearest = $null
+    foreach ($node in @($scope.FindAll({
+                    param($inner)
+                    $inner -is [System.Management.Automation.Language.AssignmentStatementAst]
+                }, $true))) {
+        if ($node.Left -isnot [System.Management.Automation.Language.VariableExpressionAst]) { continue }
+        if ($node.Left.VariablePath.UserPath -ne $Name) { continue }
+        if ([int]$node.Extent.StartLineNumber -ge $Line) { continue }
+        if ($null -eq $nearest) { $nearest = $node; continue }
+        if ([int]$node.Extent.StartLineNumber -gt [int]$nearest.Extent.StartLineNumber) { $nearest = $node }
+    }
+    if ($null -eq $nearest) { return $null }
+
+    return (Get-ArContractStaticName -Ast $Ast -Expression $nearest.Right -Line ([int]$nearest.Extent.StartLineNumber) -Depth ($Depth + 1))
+}
+
 # --------------------------------------------------------------------------- #
 # target registry backup
 # --------------------------------------------------------------------------- #
@@ -432,61 +486,74 @@ Describe 'firewall registration' {
     # tcp for the RDP session agent). The contract is therefore name-level: every
     # added name must be registered, and every registration must name a rule that
     # is actually added. Line proximity proves neither direction.
+    # Non-literal names are covered by the runtime-path registration in the same file.
     $addPattern = 'advfirewall\s+firewall\s+add\s+rule'
     $registrationPattern = '\$script:ARFirewallRules\s*\.\s*Add\s*\('
     $addSites = New-Object System.Collections.ArrayList
-    $addNames = New-Object System.Collections.ArrayList
-    $registeredNames = New-Object System.Collections.ArrayList
+    $literalAdds = New-Object System.Collections.ArrayList
+    $literalRegistrations = New-Object System.Collections.ArrayList
     $unresolved = New-Object System.Collections.ArrayList
 
     foreach ($path in @(Get-ArSourceFilePaths)) {
         $file = Split-Path -Leaf $path
         $lines = @(Get-ArContractLines -Path $path)
         $ast = (Get-ArParseResult -Path $path).Ast
+        $fileAdds = New-Object System.Collections.ArrayList
+        $fileUnresolved = New-Object System.Collections.ArrayList
+        $fileRuntimeRegistration = $false
 
         foreach ($index in @(Get-ArContractPatternIndexes -Lines $lines -Pattern $addPattern)) {
             $lineNumber = $index + 1
-            $null = $addSites.Add(('{0}:{1} {2}' -f $file, $lineNumber, $lines[$index].Trim()))
+            $site = ('{0}:{1}' -f $file, $lineNumber)
+            $null = $addSites.Add(('{0} {1}' -f $site, $lines[$index].Trim()))
             $quoted = [regex]::Match($lines[$index], 'name\s*=\s*"([^"]*)"')
             if (-not $quoted.Success) {
-                $null = $unresolved.Add(('{0}:{1} adds a rule with no name= argument' -f $file, $lineNumber))
+                $null = $unresolved.Add(('{0} adds a rule with no name= argument' -f $site))
                 continue
             }
             $value = $quoted.Groups[1].Value
             $name = $null
             if ($value -match '^\$([A-Za-z_][A-Za-z0-9_]*)$') {
-                $name = Get-ArContractRuleNameVariable -Ast $ast -Name $Matches[1] -Line $lineNumber
+                $name = Get-ArContractStaticVariable -Ast $ast -Name $Matches[1] -Line $lineNumber
             }
             elseif ($value -notmatch '\$') {
                 $name = $value
             }
             if ($null -eq $name) {
-                $null = $unresolved.Add(('{0}:{1} name="{2}" does not resolve to a literal rule name' -f $file, $lineNumber, $value))
+                $null = $fileUnresolved.Add(('{0} name="{1}" does not resolve to a literal rule name' -f $site, $value))
                 continue
             }
-            $null = $addNames.Add([pscustomobject]@{ Name = $name; Site = ('{0}:{1}' -f $file, $lineNumber) })
+            $null = $fileAdds.Add([pscustomobject]@{ Name = $name; Site = $site; File = $file })
         }
 
         foreach ($index in @(Get-ArContractPatternIndexes -Lines $lines -Pattern $registrationPattern)) {
             $lineNumber = $index + 1
+            $site = ('{0}:{1}' -f $file, $lineNumber)
             $match = [regex]::Match($lines[$index], '\$script:ARFirewallRules\s*\.\s*Add\s*\(\s*([^)]*?)\s*\)')
             if (-not $match.Success) {
-                $null = $unresolved.Add(('{0}:{1} has an ARFirewallRules.Add this check cannot read' -f $file, $lineNumber))
+                $null = $unresolved.Add(('{0} has an ARFirewallRules.Add this check cannot read' -f $site))
                 continue
             }
             $argument = $match.Groups[1].Value
             $name = $null
-            if ($argument -match '^\$([A-Za-z_][A-Za-z0-9_]*)$') {
-                $name = Get-ArContractRuleNameVariable -Ast $ast -Name $Matches[1] -Line $lineNumber
-            }
-            elseif ($argument -match "^'(.*)'$") { $name = $Matches[1] }
+            if ($argument -match "^'(.*)'$") { $name = $Matches[1] }
             elseif ($argument -match '^"(.*)"$') { $name = $Matches[1] }
+            elseif ($argument -match '^\$([A-Za-z_][A-Za-z0-9_]*)$') {
+                $name = Get-ArContractStaticVariable -Ast $ast -Name $Matches[1] -Line $lineNumber
+            }
             if ($null -eq $name) {
-                $null = $unresolved.Add(('{0}:{1} ARFirewallRules.Add({2}) does not resolve to a literal rule name' -f $file, $lineNumber, $argument))
+                $fileRuntimeRegistration = $true
                 continue
             }
-            $null = $registeredNames.Add([pscustomobject]@{ Name = $name; Site = ('{0}:{1}' -f $file, $lineNumber) })
+            $null = $literalRegistrations.Add([pscustomobject]@{ Name = $name; Site = $site; File = $file })
         }
+
+        # A computed add is only trusted when this file also registers a computed
+        # name at runtime; a literal add always needs a literal registration.
+        if (-not $fileRuntimeRegistration) {
+            foreach ($entry in @($fileUnresolved)) { $null = $unresolved.Add($entry) }
+        }
+        foreach ($entry in @($fileAdds)) { $null = $literalAdds.Add($entry) }
     }
 
     It 'registers every firewall rule name it adds' {
@@ -496,16 +563,16 @@ Describe 'firewall registration' {
         Assert-Equal 0 $unresolved.Count `
             ('firewall rule names that do not resolve to a literal, so cleanup cannot be proven: ' + (@($unresolved) -join '; '))
 
-        $addedSet = New-Object 'System.Collections.Generic.HashSet[string]'
-        foreach ($entry in @($addNames)) { $null = $addedSet.Add($entry.Name) }
-        $registeredSet = New-Object 'System.Collections.Generic.HashSet[string]'
-        foreach ($entry in @($registeredNames)) { $null = $registeredSet.Add($entry.Name) }
+        $registeredKeys = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($entry in @($literalRegistrations)) { $null = $registeredKeys.Add(($entry.File + '|' + $entry.Name)) }
+        $addedKeys = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($entry in @($literalAdds)) { $null = $addedKeys.Add(($entry.File + '|' + $entry.Name)) }
 
         $missing = New-Object System.Collections.ArrayList
         $seen = New-Object 'System.Collections.Generic.HashSet[string]'
-        foreach ($entry in @($addNames)) {
-            if ($registeredSet.Contains($entry.Name)) { continue }
-            if (-not $seen.Add($entry.Name)) { continue }
+        foreach ($entry in @($literalAdds)) {
+            if ($registeredKeys.Contains($entry.File + '|' + $entry.Name)) { continue }
+            if (-not $seen.Add($entry.File + '|' + $entry.Name)) { continue }
             $null = $missing.Add(('{0} added at {1} is never added to $script:ARFirewallRules' -f $entry.Name, $entry.Site))
         }
         Assert-Equal 0 $missing.Count `
@@ -513,9 +580,9 @@ Describe 'firewall registration' {
 
         $stale = New-Object System.Collections.ArrayList
         $seen = New-Object 'System.Collections.Generic.HashSet[string]'
-        foreach ($entry in @($registeredNames)) {
-            if ($addedSet.Contains($entry.Name)) { continue }
-            if (-not $seen.Add($entry.Name)) { continue }
+        foreach ($entry in @($literalRegistrations)) {
+            if ($addedKeys.Contains($entry.File + '|' + $entry.Name)) { continue }
+            if (-not $seen.Add($entry.File + '|' + $entry.Name)) { continue }
             $null = $stale.Add(('{0} registered at {1} is never added by an advfirewall rule' -f $entry.Name, $entry.Site))
         }
         Assert-Equal 0 $stale.Count `
@@ -523,7 +590,7 @@ Describe 'firewall registration' {
 
         # Both subsets are proven above, so an empty add set or an empty
         # registration set fails instead of passing on nothing.
-        Assert-True ($registeredSet.Count -gt 0) `
+        Assert-True ($literalRegistrations.Count -gt 0) `
             'no rule name is registered in $script:ARFirewallRules; every added rule would outlive the session'
     }
 }

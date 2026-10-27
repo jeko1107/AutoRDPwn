@@ -14,6 +14,9 @@ $script:ARCleanupDone = $false
 $script:ARLastFailure = ''
 $script:ARRegistryBackup = New-Object System.Collections.Generic.List[object]
 $script:ARInstalledProducts = New-Object System.Collections.Generic.List[string]
+if (-not (Get-Variable -Name ARAssumeYes -Scope Script -ErrorAction SilentlyContinue)) { $script:ARAssumeYes = $false }
+if (-not (Get-Variable -Name ARFirewallRestore -Scope Script -ErrorAction SilentlyContinue)) { $script:ARFirewallRestore = New-Object System.Collections.Generic.List[object] }
+if (-not (Get-Variable -Name ARRemoteDefenderChanges -Scope Script -ErrorAction SilentlyContinue)) { $script:ARRemoteDefenderChanges = New-Object System.Collections.Generic.List[object] }
 
 function Invoke-ARDownload {
     param(
@@ -197,10 +200,50 @@ function Restore-ARDefender {
     $script:ARDefenderAddedPaths.Clear()
 }
 
-function Write-ARInfo { param([string]$Text); Write-Host ('[i] ' + $Text) -ForegroundColor Green }
+function Write-ARLog {
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [ValidateSet('Info', 'Warn', 'Error')][string]$Level = 'Info'
+    )
+    # A log failure must never take the tool down: worst case is a missing line.
+    try {
+        $logDirectory = Join-Path $env:LOCALAPPDATA 'AutoRDPwn\logs'
+        if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
+        $now = Get-Date
+        $logPath = Join-Path $logDirectory ('ardpwn-' + $now.ToString('yyyyMMdd') + '.log')
+        if (Test-Path -LiteralPath $logPath) {
+            $info = Get-Item -LiteralPath $logPath -ErrorAction SilentlyContinue
+            if ($info -and $info.Length -gt 5MB) {
+                $archive = Join-Path $logDirectory ('ardpwn-' + $now.ToString('yyyyMMdd') + '-' + $now.ToString('HHmmss') + '.log')
+                Move-Item -LiteralPath $logPath -Destination $archive -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Add-Content -LiteralPath $logPath -Value ($now.ToString('yyyy-MM-dd HH:mm:ss') + ' [' + $Level + '] ' + $Message) -Encoding UTF8 -ErrorAction Stop
+    }
+    catch { }
+}
+
+function Write-ARProgress {
+    param(
+        [Parameter(Mandatory = $true)][string]$Activity,
+        [Parameter(Mandatory = $true)][int]$Percent,
+        [string]$Status = ''
+    )
+    if (Get-Variable -Name ARTestMode -Scope Script -ValueOnly -ErrorAction SilentlyContinue) { return }
+    $redirected = $false
+    try { $redirected = [Console]::IsOutputRedirected } catch { }
+    if ($redirected) { return }
+    if ($Percent -lt 0) { $Percent = 0 }
+    if ($Percent -gt 100) { $Percent = 100 }
+    $parameters = @{ Activity = $Activity; PercentComplete = $Percent }
+    if ($Status -ne '') { $parameters['Status'] = $Status }
+    Write-Progress @parameters
+}
+
+function Write-ARInfo { param([string]$Text); Write-ARLog -Message $Text -Level Info; Write-Host ('[i] ' + $Text) -ForegroundColor Green }
 function Write-ARSuccess { param([string]$Text); Write-Host ('[+] ' + $Text) -ForegroundColor Blue }
-function Write-ARWarn { param([string]$Text); Write-Host ('[!] ' + $Text) -ForegroundColor Yellow }
-function Write-ARError { param([string]$Text); Write-Host ('[!] ' + $Text) -ForegroundColor Red }
+function Write-ARWarn { param([string]$Text); Write-ARLog -Message $Text -Level Warn; Write-Host ('[!] ' + $Text) -ForegroundColor Yellow }
+function Write-ARError { param([string]$Text); Write-ARLog -Message $Text -Level Error; Write-Host ('[!] ' + $Text) -ForegroundColor Red }
 function Write-ARBlank { Write-Host '' }
 
 function Read-ARValue {
@@ -325,9 +368,75 @@ function Close-ARTargetSession {
 }
 
 function Get-ARTargetSession {
-    $session = Connect-ARTargetSession
-    if (-not $session) { throw 'Unable to open a PowerShell session to the target.' }
-    return $session
+    # Cache contract: hand out the cached session only while it is Opened and
+    # still points at the current target; anything else gets dropped and rebuilt.
+    $target = Get-ARTargetComputer
+    $cached = $script:ARSession
+    if ($cached) {
+        $state = ''
+        $name = ''
+        try { $state = [string]$cached.State } catch { }
+        try { $name = [string]$cached.ComputerName } catch { }
+        if ($state -eq 'Opened' -and ($name -eq '' -or $name -eq $target)) { return $cached }
+        try { Remove-PSSession -Session $cached -ErrorAction SilentlyContinue } catch { }
+        $script:ARSession = $null
+    }
+    $lastError = $null
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        if ($attempt -gt 0) { Start-Sleep -Seconds (2 * $attempt) }
+        try {
+            $session = Connect-ARTargetSession
+            if ($session) {
+                $state = ''
+                try { $state = [string]$session.State } catch { }
+                if ($state -eq 'Opened') { return $session }
+            }
+        }
+        catch { $lastError = $_ }
+    }
+    if ($lastError) { throw $lastError }
+    throw 'Unable to open a PowerShell session to the target.'
+}
+
+function Invoke-ARRemote {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
+        [object[]]$ArgumentList = @(),
+        [int]$Retry = 3,
+        [int]$Delay = 2,
+        [System.Management.Automation.Runspaces.PSSession]$Session = $null
+    )
+    if ($null -eq $Session) { $Session = Get-ARTargetSession }
+    $attempts = $Retry
+    if ($attempts -lt 1) { $attempts = 1 }
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            return Invoke-Command -Session $Session -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList -ErrorAction Stop
+        }
+        catch {
+            $lastError = $_
+            $retryable = $false
+            if ($_.Exception -is [System.Management.Automation.Runspaces.PSRemotingTransportException]) { $retryable = $true }
+            elseif ($_.Exception -is [System.Management.Automation.Runspaces.PSRemotingDataStructureException]) { $retryable = $true }
+            elseif ($_.Exception.Message -match 'transport|broken pipe|deadlock|WSMan') { $retryable = $true }
+            if (-not $retryable) { throw }
+            if ($attempt -ge $attempts) { break }
+            Start-Sleep -Seconds ([int]($Delay * [Math]::Pow(2, ($attempt - 1))))
+            # One reconnect between attempts, only when the session actually died.
+            $state = ''
+            try { $state = [string]$Session.State } catch { }
+            if ($state -ne 'Opened') {
+                try {
+                    if ($script:ARSession -eq $Session) { $script:ARSession = $null }
+                    Remove-PSSession -Session $Session -ErrorAction SilentlyContinue
+                    $Session = Get-ARTargetSession
+                }
+                catch { }
+            }
+        }
+    }
+    throw $lastError
 }
 
 function Invoke-ARTargetCommand {
@@ -543,7 +652,8 @@ function Install-ARRdpWrap {
         $ruleName = Get-ARText 'Pwn6' 'RDP session agent'
         if (-not $script:ARFirewallRules.Contains($ruleName)) { $script:ARFirewallRules.Add($ruleName) }
         $uninstallRoots = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')
-        $install = Invoke-Command -Session $Session -ArgumentList $remoteMsi, $ruleName, $uninstallRoots -ScriptBlock {
+        Write-ARProgress -Activity 'Installing RDP Wrap' -Percent 10 -Status 'Installing MSI on target'
+        $install = Invoke-ARRemote -Session $Session -ArgumentList $remoteMsi, $ruleName, $uninstallRoots -ScriptBlock {
             param($msi, $rule, $roots)
             # Products present before this run: anything else in the diff came from us.
             $before = @{}
@@ -571,7 +681,8 @@ function Install-ARRdpWrap {
             }
             Remove-Item -LiteralPath (Split-Path -Parent $msi) -Recurse -Force -ErrorAction SilentlyContinue
             return [pscustomobject]@{ ExitCode = $process.ExitCode; Products = @($products.ToArray()) }
-        } -ErrorAction Stop
+        }
+        Write-ARProgress -Activity 'Installing RDP Wrap' -Percent 100 -Status 'Install finished'
         foreach ($product in @($install.Products)) {
             if ([string]::IsNullOrWhiteSpace([string]$product)) { continue }
             if (-not $script:ARInstalledProducts.Contains([string]$product)) { $script:ARInstalledProducts.Add([string]$product) }
@@ -793,7 +904,7 @@ function Remove-ARTargetArtifacts {
     if ($script:ARHashUserName -ne '') { $accounts += $script:ARHashUserName }
     $rules = @($script:ARFirewallRules.ToArray())
     try {
-        Invoke-Command -Session $Session -ArgumentList $tempDirs, $accounts, $rules -ScriptBlock {
+        Invoke-ARRemote -Session $Session -ArgumentList $tempDirs, $accounts, $rules -ScriptBlock {
             param($dirs, $users, $firewallRules)
             Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AutoRDPwn_*' } | Stop-Job -ErrorAction SilentlyContinue
             Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AutoRDPwn_*' } | Remove-Job -Force -ErrorAction SilentlyContinue
@@ -841,7 +952,7 @@ function Remove-ARTargetArtifacts {
             foreach ($rule in @($firewallRules + 'AutoRDPwn-TermService-RPC-In')) {
                 netsh advfirewall firewall delete rule name="$rule" 2>&1> $null
             }
-        } -ErrorAction Stop | Out-Null
+        } | Out-Null
     }
     catch {
         $status.Errors++
@@ -853,7 +964,7 @@ function Remove-ARTargetArtifacts {
     $registryBackup = @($script:ARRegistryBackup.ToArray())
     if ($registryBackup.Count -gt 0) {
         try {
-            $failures = @(Invoke-Command -Session $Session -ArgumentList $registryBackup -ScriptBlock {
+            $failures = @(Invoke-ARRemote -Session $Session -ArgumentList $registryBackup -ScriptBlock {
                 param($entries)
                 $failed = New-Object System.Collections.Generic.List[string]
                 foreach ($entry in $entries) {
@@ -876,7 +987,7 @@ function Remove-ARTargetArtifacts {
                     catch { $failed.Add($name + ': ' + $_.Exception.Message) }
                 }
                 return $failed.ToArray()
-            } -ErrorAction Stop)
+            })
             foreach ($failure in $failures) {
                 $status.Errors++
                 $status.Skipped.Add('registry: ' + [string]$failure)
@@ -895,7 +1006,8 @@ function Remove-ARTargetArtifacts {
     $products = @($script:ARInstalledProducts.ToArray())
     if ($products.Count -gt 0) {
         try {
-            $failures = @(Invoke-Command -Session $Session -ArgumentList $products -ScriptBlock {
+            Write-ARProgress -Activity 'Uninstalling MSI products' -Percent 10 -Status ('Removing ' + $products.Count + ' product(s)')
+            $failures = @(Invoke-ARRemote -Session $Session -ArgumentList $products -ScriptBlock {
                 param($productCodes)
                 $roots = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')
                 $failed = New-Object System.Collections.Generic.List[string]
@@ -912,7 +1024,8 @@ function Remove-ARTargetArtifacts {
                     catch { $failed.Add([string]$code + ': ' + $_.Exception.Message) }
                 }
                 return $failed.ToArray()
-            } -ErrorAction Stop)
+            })
+            Write-ARProgress -Activity 'Uninstalling MSI products' -Percent 100 -Status 'Uninstall finished'
             foreach ($failure in $failures) {
                 $status.Errors++
                 $status.Skipped.Add('msi: ' + [string]$failure)
@@ -925,6 +1038,51 @@ function Remove-ARTargetArtifacts {
             Write-ARWarn ('MSI uninstall incomplete: ' + $_.Exception.Message)
         }
         $script:ARInstalledProducts.Clear()
+    }
+
+    # Firewall rules we re-enabled during the run go back to disabled.
+    $firewallRestore = @($script:ARFirewallRestore.ToArray())
+    if ($firewallRestore.Count -gt 0) {
+        try {
+            $ruleNames = @($firewallRestore | ForEach-Object { [string]$_.Name } | Where-Object { $_ -ne '' })
+            Invoke-ARRemote -Session $Session -ArgumentList $ruleNames -ScriptBlock {
+                param($names)
+                foreach ($name in $names) {
+                    Set-NetFirewallRule -Name $name -Enabled False -ErrorAction SilentlyContinue
+                }
+            } | Out-Null
+        }
+        catch {
+            $status.Errors++
+            $status.Skipped.Add('firewall restore')
+            Write-ARWarn ('Firewall rules not restored: ' + $_.Exception.Message)
+        }
+        $script:ARFirewallRestore.Clear()
+    }
+
+    # Defender preferences changed on the target get replayed to their prior state.
+    $defenderChanges = @($script:ARRemoteDefenderChanges.ToArray())
+    if ($defenderChanges.Count -gt 0) {
+        try {
+            Invoke-ARRemote -Session $Session -ArgumentList $defenderChanges -ScriptBlock {
+                param($changes)
+                foreach ($change in $changes) {
+                    $kind = [string]$change.Kind
+                    if ($kind -eq 'ExclusionPath') {
+                        Remove-MpPreference -ExclusionPath ([string]$change.Name) -ErrorAction SilentlyContinue
+                    }
+                    elseif ($kind -eq 'DisableRealtimeMonitoring') {
+                        Set-MpPreference -DisableRealtimeMonitoring ([bool]$change.Value) -ErrorAction SilentlyContinue
+                    }
+                }
+            } | Out-Null
+        }
+        catch {
+            $status.Errors++
+            $status.Skipped.Add('defender restore')
+            Write-ARWarn ('Defender preferences not restored: ' + $_.Exception.Message)
+        }
+        $script:ARRemoteDefenderChanges.Clear()
     }
     return $status
 }

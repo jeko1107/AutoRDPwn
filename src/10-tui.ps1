@@ -34,6 +34,12 @@ $script:ARCategoryScroll = 0
 $script:ARPendingKey = $null
 $script:ARTuiPromptRow = 0
 $script:ARLineCategoryKey = ''
+$script:ARTuiCapture = $null
+$script:ARTuiFrameRows = @()
+$script:ARTuiFrameSignature = ''
+$script:ARFavorites = New-Object System.Collections.Generic.List[string]
+$script:ARFavoritesLoaded = $false
+$script:ARFilterStore = @{ categories = ''; actions = '' }
 $script:ARLegacyMap = @{
     '11' = '101'
     '12' = '201'
@@ -206,6 +212,9 @@ function Clear-ARScreen {
 
 function Start-ARTuiFrame {
     param([string]$Screen = 'main')
+    $script:ARTuiCapture = $null
+    $script:ARTuiFrameRows = @()
+    $script:ARTuiFrameSignature = ''
     if ($script:ARTestMode) { return }
     try {
         $width = Get-ARConsoleWidth
@@ -259,6 +268,14 @@ function Write-ARLine {
         $script:ARTestBuffer.Add($Text)
         return
     }
+    if ($null -ne $script:ARTuiCapture) {
+        $script:ARTuiCapture.Add([pscustomobject]@{
+                Text       = [string]$Text
+                Color      = [string]$Color
+                Background = [string]$Background
+            })
+        return
+    }
     if ($script:ARTuiFrameActive) {
         $width = $script:ARTuiFrameWidth - 1
         if ($width -gt 0 -and $Text.Length -lt $width) {
@@ -272,6 +289,159 @@ function Write-ARLine {
     else {
         Write-Host $Text -ForegroundColor $Color
     }
+}
+
+function Begin-ARTuiCapture {
+    if ($script:ARTestMode) {
+        $script:ARTuiCapture = $null
+        return
+    }
+    $script:ARTuiCapture = New-Object System.Collections.Generic.List[object]
+}
+
+function Write-ARTuiRowAt {
+    param(
+        [int]$Row = 0,
+        [AllowEmptyString()][string]$Text = '',
+        [string]$Color = 'Gray',
+        [string]$Background = '',
+        [int]$Width = 0
+    )
+    $line = [string]$Text
+    if ($Width -gt 0) {
+        if ($line.Length -lt $Width) { $line = $line.PadRight($Width) }
+        elseif ($line.Length -gt $Width) { $line = $line.Substring(0, $Width) }
+    }
+    try { [Console]::SetCursorPosition(0, $Row) } catch { }
+    # -NoNewline keeps the cursor off the last row, so a full frame never scrolls
+    # the buffer and the row index stays valid for the next diff.
+    if ($Background -ne '') {
+        Write-Host $line -ForegroundColor $Color -BackgroundColor $Background -NoNewline
+    }
+    else {
+        Write-Host $line -ForegroundColor $Color -NoNewline
+    }
+}
+
+function Out-ARTuiFrame {
+    param([string]$Screen = 'main')
+
+    $rows = @()
+    if ($null -ne $script:ARTuiCapture) { $rows = @($script:ARTuiCapture.ToArray()) }
+    $script:ARTuiCapture = $null
+    if ($script:ARTestMode) { return }
+
+    $width = Get-ARConsoleWidth
+    $height = Get-ARConsoleHeight
+    $rowWidth = [Math]::Max(0, $width - 1)
+    $signature = ('{0}|{1}|{2}' -f $Screen, $width, $height)
+    $previous = @($script:ARTuiFrameRows)
+    $sameShape = ($signature -eq $script:ARTuiFrameSignature) -and ($previous.Count -gt 0)
+
+    $script:ARTuiFrameSignature = $signature
+    $script:ARTuiFrameRows = $rows
+    $script:ARTuiFrameWidth = $width
+    $script:ARTuiFrameHeight = $height
+    $script:ARTuiFrameScreen = $Screen
+    $script:ARTuiFrameActive = $true
+    $script:ARTuiFrameLine = $rows.Count
+
+    $painted = $false
+    if ($sameShape) {
+        try {
+            for ($i = 0; $i -lt $rows.Count; $i++) {
+                $row = $rows[$i]
+                if ($i -lt $previous.Count) {
+                    $old = $previous[$i]
+                    if ($old.Text -eq $row.Text -and $old.Color -eq $row.Color -and $old.Background -eq $row.Background) { continue }
+                }
+                Write-ARTuiRowAt -Row $i -Text $row.Text -Color $row.Color -Background $row.Background -Width $rowWidth
+            }
+            for ($i = $rows.Count; $i -lt $previous.Count; $i++) {
+                Write-ARTuiRowAt -Row $i -Text '' -Width $rowWidth
+            }
+            $painted = $true
+        }
+        catch {
+            $painted = $false
+        }
+    }
+
+    if (-not $painted) {
+        if (-not $script:ARNoClear) {
+            try { Clear-Host } catch { }
+        }
+        for ($i = 0; $i -lt $rows.Count; $i++) {
+            $row = $rows[$i]
+            Write-ARTuiRowAt -Row $i -Text $row.Text -Color $row.Color -Background $row.Background -Width $rowWidth
+        }
+    }
+    try { [Console]::CursorVisible = $false } catch { }
+}
+
+function Test-ARSessionOpen {
+    $variable = Get-Variable -Name 'ARSession' -Scope Script -ErrorAction SilentlyContinue
+    if ($null -eq $variable) { return $false }
+    if ($null -eq $variable.Value) { return $false }
+    try {
+        $state = [string]$variable.Value.State
+        if ($state -ne '' -and $state -ne 'Opened') { return $false }
+    }
+    catch { }
+    return $true
+}
+
+function Get-ARFavorites {
+    if (-not $script:ARFavoritesLoaded) {
+        $script:ARFavorites = New-Object System.Collections.Generic.List[string]
+        $state = Get-ARLastState
+        if ($state.ContainsKey('Favorites')) {
+            foreach ($entry in @($state['Favorites'])) {
+                if ($null -eq $entry) { continue }
+                $id = ([string]$entry).Trim()
+                if ($id -eq '') { continue }
+                if (-not $script:ARFavorites.Contains($id)) { $script:ARFavorites.Add($id) }
+            }
+        }
+        $script:ARFavoritesLoaded = $true
+    }
+    return @($script:ARFavorites.ToArray())
+}
+
+function Save-ARFavorites {
+    # Merge into the shared state file so the language, the last profile and the
+    # saved timestamp survive a favourite toggle.
+    $state = Get-ARLastState
+    $state['Favorites'] = [string[]]@($script:ARFavorites.ToArray())
+    if (-not $state.ContainsKey('Saved')) {
+        $state['Saved'] = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    }
+    Save-ARLastState -State $state
+}
+
+function Test-ARFavorite {
+    param([string]$Id = '')
+    if ([string]::IsNullOrWhiteSpace($Id)) { return $false }
+    foreach ($favorite in @(Get-ARFavorites)) {
+        if ($favorite -eq $Id) { return $true }
+    }
+    return $false
+}
+
+function Toggle-ARFavorite {
+    param([string]$Id = '')
+    if ([string]::IsNullOrWhiteSpace($Id)) { return $false }
+    $null = Get-ARFavorites
+    if ($script:ARFavorites.Contains($Id)) {
+        $null = $script:ARFavorites.Remove($Id)
+        Save-ARFavorites
+        Set-ARStatus ((Get-ARText 'txt177' 'Removed from favourites') + ': ' + $Id) 'Info'
+        return $false
+    }
+    $script:ARFavorites.Add($Id)
+    Save-ARFavorites
+    Set-ARStatus ((Get-ARText 'txt176' 'Added to favourites') + ': ' + $Id) 'Info'
+    return $true
 }
 
 function Test-ARIsAdmin {
@@ -342,28 +512,38 @@ function Get-ARActionCatalog {
     $items.Add((New-ARAction -Id '103' -Title 'PowerShell HTTP-RevShell (HTTP/S)' -Description (Get-ARText 'txt97' 'Reverse shell that dials back over HTTP/S, crosses proxies') -Handler 'Invoke-ARModuleHttpRevShell'))
     $items.Add((New-ARAction -Id '104' -Title (Get-ARText 'txt51' 'Netcat console (direct connection)') -Description (Get-ARText 'txt99' 'The target listens and you connect to it') -Handler 'Invoke-ARModuleNetcatDirect'))
     $items.Add((New-ARAction -Id '105' -Title (Get-ARText 'txt52' 'Netcat console (reverse connection)') -Description (Get-ARText 'txt98' 'You listen and the target connects back to you') -Handler 'Invoke-ARModuleNetcatReverse'))
+    $items.Add((New-ARAction -Id '801' -Title (Get-ARText 'txt166' 'Enable RDP') -Description 'Enable Remote Desktop and its firewall rule, restoring every value on cleanup' -Handler 'Invoke-ARAttackEnableRdp' -NeedsSession $true))
 
     $items.Add((New-ARGroup -Title (Get-ARText 'txt50' 'Passwords and hashes') -Description (Get-ARText 'txt140' 'Dump credentials, browser secrets and saved Wi-Fi keys')))
     $items.Add((New-ARAction -Id '201' -Title (Get-ARText 'txt9' 'Extract local hashes with Mimikatz') -Description (Get-ARText 'txt100' 'Dump local account password hashes from the SAM registry hive') -Handler 'Invoke-ARModuleMimikatzSam'))
     $items.Add((New-ARAction -Id '202' -Title (Get-ARText 'txt10' 'Extract system passwords with Mimikatz') -Description (Get-ARText 'txt101' 'Extract plaintext passwords from the memory of authenticated processes') -Handler 'Invoke-ARModuleMimikatzLogon'))
     $items.Add((New-ARAction -Id '203' -Title (Get-ARText 'txt49' 'Obtain browsers passwords with SharpWeb') -Description (Get-ARText 'txt102' 'Recover passwords saved in Chrome, Firefox and other browsers') -Handler 'Invoke-ARModuleSharpWeb'))
     $items.Add((New-ARAction -Id '204' -Title (Get-ARText 'txt59' 'Recover Wi-Fi passwords') -Description (Get-ARText 'txt103' 'Show the keys of saved WiFi networks in clear text') -Handler 'Invoke-ARModuleWifiKeys'))
+    $items.Add((New-ARAction -Id '205' -Title (Get-ARText 'txt163' 'Lsass dump') -Description 'Dump LSASS memory with comsvcs.dll and pull the minidump back to the operator' -Handler 'Invoke-ARAttackLsassDump' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '206' -Title (Get-ARText 'txt164' 'Sam dump') -Description 'Save the SAM, SYSTEM and SECURITY hives with reg save and pull them back' -Handler 'Invoke-ARAttackSamDump' -NeedsSession $true))
 
     $items.Add((New-ARGroup -Title (Get-ARText 'txt125' 'Networking / Pivoting') -Description (Get-ARText 'txt141' 'Scan, forward ports, serve files and spray credentials')))
     $items.Add((New-ARAction -Id '301' -Title 'TCP Port Scan' -Description (Get-ARText 'txt104' 'Multi-threaded TCP port scan of the target') -Handler 'Invoke-ARModulePortScan' -NeedsSession $false))
     $items.Add((New-ARAction -Id '302' -Title 'Native Port Forwarding' -Description (Get-ARText 'txt105' 'Forward ports with netsh, inbound locally or remote pivoting') -Handler 'Invoke-ARModulePortForward'))
     $items.Add((New-ARAction -Id '303' -Title 'PowerShell Web Server' -Description (Get-ARText 'txt106' 'Serve files from the target with a PowerShell web server') -Handler 'Invoke-ARModuleWebServer'))
     $items.Add((New-ARAction -Id '304' -Title 'Network Creds Scanner' -Description (Get-ARText 'txt107' 'Test a password or NTLM hash against a CIDR range via SMB/WMI') -Handler 'Invoke-ARModuleCredScan' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '207' -Title (Get-ARText 'txt165' 'Credential spray') -Description 'Try one password against a list of users over SMB and report the hits' -Handler 'Invoke-ARAttackCredentialSpray' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '901' -Title (Get-ARText 'txt171' 'File exfiltration') -Description 'Zip a folder on the target and pull the archive back to the operator' -Handler 'Invoke-ARModuleFileExfil' -NeedsSession $true))
 
     $items.Add((New-ARGroup -Title (Get-ARText 'txt126' 'Remote Desktop Forensics') -Description (Get-ARText 'txt142' 'Recover session history and enumerate local accounts')))
     $items.Add((New-ARAction -Id '401' -Title (Get-ARText 'txt11' 'Rebuild the image cache') -Description (Get-ARText 'txt129' 'Recover the RDP session history cached on this computer') -Handler 'Invoke-ARModuleRdpCaching' -NeedsTarget $false -NeedsSession $false))
     $items.Add((New-ARAction -Id '402' -Title (Get-ARText 'txt127' 'List local users and groups') -Description (Get-ARText 'txt109' 'List every user with SID, groups and last logon details') -Handler 'Invoke-ARModuleListUsers'))
     $items.Add((New-ARAction -Id '403' -Title (Get-ARText 'txt128' 'Extract session credentials (SessionGopher)') -Description (Get-ARText 'txt110' 'Extract credentials stored by PuTTY, SuperPuTTY, FileZilla and WinSCP') -Handler 'Invoke-ARModuleSessionGopher'))
+    $items.Add((New-ARAction -Id '804' -Title (Get-ARText 'txt169' 'Shadow copies') -Description 'List and expose the volume shadow copies of the target' -Handler 'Invoke-ARAttackShadowCopies' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '902' -Title (Get-ARText 'txt172' 'Screenshot loop') -Description 'Capture the target screen every N seconds and store the frames locally' -Handler 'Invoke-ARModuleScreenshotLoop' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '903' -Title (Get-ARText 'txt173' 'Clipboard watch') -Description 'Poll the clipboard of the interactive session and log every change' -Handler 'Invoke-ARModuleClipboardWatch' -NeedsSession $true))
 
     $items.Add((New-ARGroup -Title (Get-ARText 'txt64' 'Backdoors and persistence') -Description (Get-ARText 'txt143' 'Sticky keys, Metasploit and a remote keylogger')))
     $items.Add((New-ARAction -Id '501' -Title 'Sticky Keys Hacking' -Description (Get-ARText 'txt111' 'Replace sethc.exe so a SYSTEM console opens from the login screen') -Handler 'Invoke-ARModuleStickyKeys'))
     $items.Add((New-ARAction -Id '502' -Title 'Metasploit Reverse Shell' -Description (Get-ARText 'txt112' 'Deploy a persistent Metasploit reverse shell on the target') -Handler 'Invoke-ARModuleMetasploit'))
     $items.Add((New-ARAction -Id '503' -Title 'Remote Keylogger' -Description (Get-ARText 'txt113' 'Log every keystroke typed on the target console') -Handler 'Invoke-ARModuleKeylogger'))
+    $items.Add((New-ARAction -Id '904' -Title (Get-ARText 'txt174' 'Fast keylogger') -Description 'Log keystrokes and mirror the buffer back to the operator every 15 seconds' -Handler 'Invoke-ARModuleKeyloggerFast' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '504' -Title (Get-ARText 'txt175' 'Persistence kit') -Description 'Install a Run key, a scheduled task and a WMI subscription in one pass' -Handler 'Invoke-ARModulePersistenceKit' -NeedsSession $true))
 
     $items.Add((New-ARGroup -Title (Get-ARText 'txt68' 'Privilege escalation') -Description (Get-ARText 'txt144' 'Enumerate services, patches and paths to SYSTEM')))
     $items.Add((New-ARAction -Id '601' -Title (Get-ARText 'txt70' 'Get operating system information') -Description (Get-ARText 'txt114' 'Full enumeration of privesc surface and local misconfigurations') -Handler 'Invoke-ARModuleChachi'))
@@ -372,6 +552,9 @@ function Get-ARActionCatalog {
 
     $items.Add((New-ARGroup -Title (Get-ARText 'txt69' 'Other modules') -Description (Get-ARText 'txt145' 'Logs, VNC, external scripts and user switching')))
     $items.Add((New-ARAction -Id '701' -Title (Get-ARText 'txt18' 'Deactivate system logs') -Description (Get-ARText 'txt117' 'Wipe event logs without stopping the EventLog service') -Handler 'Invoke-ARModulePhant0m'))
+    $items.Add((New-ARAction -Id '805' -Title (Get-ARText 'txt170' 'Event log clear') -Description 'Clear the Windows event logs on the target after a confirmation' -Handler 'Invoke-ARAttackEventLogClear' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '802' -Title (Get-ARText 'txt167' 'Defender exclusions') -Description 'Add path and process exclusions to Defender and undo them on cleanup' -Handler 'Invoke-ARAttackDefenderExclude' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '803' -Title (Get-ARText 'txt168' 'AMSI bypass') -Description 'Patch AMSI inside the remote runspace so script scanning stops reporting' -Handler 'Invoke-ARAttackAmsiBypass' -NeedsSession $true))
     $items.Add((New-ARAction -Id '702' -Title (Get-ARText 'txt62' 'Remote VNC Server (legacy)') -Description (Get-ARText 'txt118' 'Open an invisible VNC to watch and control the target screen') -Handler 'Invoke-ARModuleVncServer'))
     $items.Add((New-ARAction -Id '703' -Title (Get-ARText 'txt67' 'External script execution') -Description (Get-ARText 'txt119' 'Run any external PowerShell script or function on the target') -Handler 'Invoke-ARModuleExternalScript'))
     $items.Add((New-ARAction -Id '704' -Title (Get-ARText 'txt79' 'Change user with RunAs') -Description (Get-ARText 'txt120' 'Validate credentials and launch processes as another user') -Handler 'Invoke-ARModuleRunAs' -NeedsTarget $false -NeedsSession $false))
@@ -518,18 +701,39 @@ function Get-ARCategoryActionList {
     if ($null -eq $Category) { return @() }
     $actions = @($Category.Actions)
     if ([string]::IsNullOrWhiteSpace($Filter)) { return $actions }
-    $needle = $Filter.Trim().ToLowerInvariant()
+    # One matcher for the whole UI: the catalog-wide filter decides which ids
+    # survive, this keeps them in the order they appear inside the category.
+    $matched = @(Get-ARFilteredCatalog -Filter $Filter | Where-Object { $_.Kind -eq 'Action' })
+    if ($matched.Count -eq 0) { return @() }
+    $keep = @{}
+    foreach ($item in $matched) { $keep[[string]$item.Id] = $true }
     $result = New-Object System.Collections.Generic.List[object]
     foreach ($action in $actions) {
-        $haystack = ([string]$action.Id + ' ' + [string]$action.Title + ' ' + [string]$action.Description).ToLowerInvariant()
-        if ($haystack.Contains($needle)) { $result.Add($action) }
+        if ($keep.ContainsKey([string]$action.Id)) { $result.Add($action) }
     }
     return $result.ToArray()
 }
 
+function Get-ARPinnedOrder {
+    param([object[]]$Actions = @())
+    if ($Actions.Count -lt 2) { return $Actions }
+    $favorites = @(Get-ARFavorites)
+    if ($favorites.Count -eq 0) { return $Actions }
+    $pinned = New-Object System.Collections.Generic.List[object]
+    $rest = New-Object System.Collections.Generic.List[object]
+    foreach ($action in $Actions) {
+        if ($favorites -contains [string]$action.Id) { $pinned.Add($action) }
+        else { $rest.Add($action) }
+    }
+    if ($pinned.Count -eq 0) { return $Actions }
+    foreach ($action in $rest) { $pinned.Add($action) }
+    return $pinned.ToArray()
+}
+
 function Get-ARCurrentActions {
     $category = Get-ARCurrentCategory
-    return @(Get-ARCategoryActionList -Category $category -Filter $script:ARFilter)
+    $actions = @(Get-ARCategoryActionList -Category $category -Filter $script:ARFilter)
+    return @(Get-ARPinnedOrder -Actions $actions)
 }
 
 function Get-ARCurrentAction {
@@ -587,9 +791,10 @@ function Enter-ARTuiCategory {
     param([string]$Key = '')
     $category = Get-ARCategoryByKey $Key
     if ($null -eq $category) { return }
+    $script:ARFilterStore['categories'] = $script:ARFilter
     $script:ARSelectedCategoryKey = $category.Key
     $script:ARTuiLevel = 'actions'
-    $script:ARFilter = ''
+    $script:ARFilter = [string]$script:ARFilterStore['actions']
     $script:ARScroll = 0
     $inside = $false
     foreach ($action in $category.Actions) {
@@ -602,13 +807,35 @@ function Enter-ARTuiCategory {
 }
 
 function Exit-ARTuiCategory {
+    $script:ARFilterStore['actions'] = $script:ARFilter
     $script:ARTuiLevel = 'categories'
-    $script:ARFilter = ''
+    $script:ARFilter = [string]$script:ARFilterStore['categories']
     $category = Get-ARCurrentCategory
     if ($null -ne $category) {
         $script:ARSelectedCategoryKey = $category.Key
     }
     Set-ARStatus (Get-ARText 'txt149' 'Top level - choose a category') 'Info'
+}
+
+function Sync-ARTuiFilterSelection {
+    # A live filter can drop the highlighted row, so the selection follows the
+    # first surviving entry instead of pointing at nothing.
+    if ($script:ARTuiLevel -eq 'categories') {
+        $categories = @(Get-ARCategoryListForDisplay)
+        if ($categories.Count -eq 0) { return }
+        foreach ($category in $categories) {
+            if ($category.Key -eq $script:ARSelectedCategoryKey) { return }
+        }
+        $script:ARSelectedCategoryKey = $categories[0].Key
+        if ($categories[0].Actions.Count -gt 0) { $script:ARSelectedId = [string]$categories[0].Actions[0].Id }
+        return
+    }
+    $actions = @(Get-ARCurrentActions)
+    if ($actions.Count -eq 0) { return }
+    foreach ($action in $actions) {
+        if ($action.Id -eq $script:ARSelectedId) { return }
+    }
+    $script:ARSelectedId = [string]$actions[0].Id
 }
 
 function Move-ARTuiSelection {
@@ -775,6 +1002,7 @@ function Resolve-ARTuiNumber {
 function Step-ARTuiBack {
     if ($script:ARFilter -ne '') {
         $script:ARFilter = ''
+        $script:ARFilterStore[$script:ARTuiLevel] = ''
         Set-ARStatus (Get-ARText 'txt154' 'Filter cleared') 'Info'
         return
     }
@@ -817,8 +1045,9 @@ function Get-ARTargetUserLabel {
 }
 
 function Get-ARVersionLabel {
-    if ($null -ne $script:ARVersion -and -not [string]::IsNullOrWhiteSpace([string]$script:ARVersion)) {
-        return [string]$script:ARVersion
+    $version = Get-Variable -Name 'ARVersion' -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $version -and -not [string]::IsNullOrWhiteSpace([string]$version.Value)) {
+        return [string]$version.Value
     }
     return '6.0'
 }
@@ -1045,7 +1274,7 @@ function Show-ARTuiScreen {
     if ($level -eq 'categories') { $script:ARCategoryScroll = $scroll }
     else { $script:ARScroll = $scroll }
 
-    Start-ARTuiFrame -Screen 'main'
+    Begin-ARTuiCapture
 
     $adminLabel = if (Test-ARIsAdmin) { 'yes' } else { 'no' }
     Write-ARBoxBorder $boxWidth
@@ -1068,6 +1297,10 @@ function Show-ARTuiScreen {
     $ruleLabel = if ($level -eq 'categories') { 'CATEGORIES' } else { 'ACTIONS' }
     Write-ARBoxRule -Width $boxWidth -Label $ruleLabel -Color 'DarkCyan'
 
+    $sessionOpen = Test-ARSessionOpen
+    $favoriteIds = @(Get-ARFavorites)
+    $sessionBadge = '[session]'
+
     for ($row = 0; $row -lt $listHeight; $row++) {
         $index = $scroll + $row
         if ($index -ge $items.Count) {
@@ -1084,10 +1317,23 @@ function Show-ARTuiScreen {
             $line = $prefix + $text
         }
         else {
-            $prefix = '{0} {1,2}. ' -f $marker, ($index + 1)
+            $pinned = ($favoriteIds -contains [string]$item.Id)
+            $pinMark = if ($pinned) { '*' } else { ' ' }
+            $prefix = '{0} {1,2}{2} ' -f $marker, ($index + 1), $pinMark
             $idText = '[{0,3}]' -f [string]$item.Id
-            $text = Format-ARBoxText ([string]$item.Title) ($contentWidth - $prefix.Length - 7)
+            $badge = ''
+            if ($item.NeedsSession -and -not $sessionOpen) { $badge = $sessionBadge }
+            $badgeWidth = 0
+            if ($badge -ne '') { $badgeWidth = $badge.Length + 1 }
+            $titleWidth = $contentWidth - $prefix.Length - 7 - $badgeWidth
+            if ($titleWidth -lt 8) { $titleWidth = 8 }
+            $text = Format-ARBoxText ([string]$item.Title) $titleWidth
             $line = $prefix + $idText + ' ' + $text
+            if ($badge -ne '') {
+                $gap = $contentWidth - $line.Length - $badge.Length
+                if ($gap -lt 1) { $gap = 1 }
+                $line = $line + (' ' * $gap) + $badge
+            }
         }
         if ($selected) {
             Write-ARBoxLine $line $boxWidth 'Black' 'Cyan'
@@ -1119,21 +1365,24 @@ function Show-ARTuiScreen {
     Write-ARBoxColumns -Left ('Status: ' + [string]$script:ARStatus['Text']) -Right $counter -Width $boxWidth -Color (Get-ARStatusColor)
 
     if ($Prompt -ne '') {
-        $script:ARTuiPromptRow = $script:ARTuiFrameLine
+        if ($null -ne $script:ARTuiCapture) { $script:ARTuiPromptRow = $script:ARTuiCapture.Count }
+        else { $script:ARTuiPromptRow = $script:ARTuiFrameLine }
         $filterText = 'Filter: ' + [string]$script:ARFilter
-        Write-ARBoxColumns -Left $filterText -Right 'Enter apply  Esc cancel  Del clear' -Width $boxWidth -Color 'Yellow'
-        Write-ARBoxLine ' Type to narrow the list, the selection follows the filter' $boxWidth 'DarkGray'
+        Write-ARBoxColumns -Left $filterText -Right (Get-ARText 'txt182' 'Enter keep   Esc clear   Del reset') -Width $boxWidth -Color 'Yellow'
+        Write-ARBoxLine (' ' + (Get-ARText 'txt181' 'Type to narrow the list: Enter keeps it, Esc clears it')) $boxWidth 'DarkGray'
     }
     else {
         if ($level -eq 'categories') {
-            Write-ARBoxLine ' Up/Down move   Enter open   digits select   / filter   R clear' $boxWidth 'DarkGray'
+            Write-ARBoxLine (' ' + (Get-ARText 'txt178' 'Up/Down move   Enter open   digits select   / filter   F pin   R clear')) $boxWidth 'DarkGray'
         }
         else {
-            Write-ARBoxLine ' Up/Down move   Enter run   Esc/Backspace back   digits jump   / filter' $boxWidth 'DarkGray'
+            Write-ARBoxLine (' ' + (Get-ARText 'txt179' 'Up/Down move   Enter run   Esc/b back   digits jump   / filter   F pin')) $boxWidth 'DarkGray'
         }
-        Write-ARBoxLine ' T target   P profiles   S save   L language   F1 help   Q quit' $boxWidth 'DarkGray'
+        Write-ARBoxLine (' ' + (Get-ARText 'txt180' 'T target   P profiles   S save   L language   F1 help   Q quit')) $boxWidth 'DarkGray'
     }
     Write-ARBoxBorder $boxWidth
+
+    Out-ARTuiFrame -Screen 'main'
 }
 
 function Show-ARHelp {
@@ -1171,10 +1420,11 @@ function Show-ARHelp {
             'Up / Down / PgUp / PgDn   move between actions',
             'Home / End                first or last action',
             'Enter                     run the selected action',
-            'Esc / Backspace / Left    back to the category list',
+            'Esc / Backspace / B / Left back to the category list',
             'Digits                    jump by number or by action id',
             '                          (1..n for position, 101..704 for id)',
             '/                         filter actions in this category',
+            'F                         pin or unpin the selected action',
             'R                         clear the filter',
             'T / P / S / L             target, profiles, save, language',
             'F1                        this help',
@@ -1863,9 +2113,18 @@ function Show-ARTui {
             }
             if ($character -eq 'P') { $null = Show-ARTargetPicker; continue }
             if ($character -eq 'S') { $null = Save-ARCurrentTarget; continue }
+            if ($character -eq 'B') { Step-ARTuiBack; continue }
+            if ($character -eq 'F') {
+                if ($script:ARTuiLevel -eq 'actions') {
+                    $current = Get-ARCurrentAction
+                    if ($null -ne $current) { $null = Toggle-ARFavorite -Id ([string]$current.Id) }
+                }
+                continue
+            }
             if ($character -eq 'R') {
                 if ($script:ARFilter -ne '') {
                     $script:ARFilter = ''
+                    $script:ARFilterStore[$script:ARTuiLevel] = ''
                     Set-ARStatus (Get-ARText 'txt154' 'Filter cleared') 'Info'
                 }
                 continue
@@ -1877,14 +2136,18 @@ function Show-ARTui {
                 $typed = Read-ARTuiInlineInput -Row $script:ARTuiPromptRow -Column 10 -Initial $previous -MaxLength $maxLength -OnChange {
                     param($value)
                     $script:ARFilter = [string]$value
+                    Sync-ARTuiFilterSelection
                     Show-ARTuiScreen -Prompt 'filter'
                 }
                 if ($null -eq $typed) {
-                    $script:ARFilter = $previous
-                    Set-ARStatus (Get-ARText 'txt153' 'Filter cancelled') 'Info'
+                    $script:ARFilter = ''
+                    $script:ARFilterStore[$script:ARTuiLevel] = ''
+                    Set-ARStatus (Get-ARText 'txt154' 'Filter cleared') 'Info'
                 }
                 else {
                     $script:ARFilter = [string]$typed
+                    $script:ARFilterStore[$script:ARTuiLevel] = $script:ARFilter
+                    Sync-ARTuiFilterSelection
                     if ($script:ARFilter -eq '') {
                         Set-ARStatus (Get-ARText 'txt154' 'Filter cleared') 'Info'
                     }

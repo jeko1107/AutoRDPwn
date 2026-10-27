@@ -2,42 +2,78 @@ name: tests
 
 on:
   push:
-    branches: [master, main]
+    branches: [master]
   pull_request:
+    branches: [master]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-jobs:
-  suite:
-    name: suite (${{ matrix.name }})
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: windows-powershell-5.1
-            exe: powershell
-          - name: powershell-7
-            exe: pwsh
-    steps:
-      - uses: actions/checkout@v4
+defaults:
+  run:
+    shell: powershell
 
-      - name: Show host
-        shell: cmd
-        run: ${{ matrix.exe }} -NoProfile -Command $PSVersionTable.PSVersion
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Show PowerShell version
+        run: |
+          $PSVersionTable
+
+      - name: Parse check
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $script:ArTestRoot = (Get-Location).Path
+          $script:ArTestSandbox = Join-Path -Path $script:ArTestRoot -ChildPath '_sandbox'
+          . (Join-Path -Path $script:ArTestRoot -ChildPath 'Tests\ArAst.ps1')
+          $parseFailed = $false
+          foreach ($sourceFile in (Get-ArSourceFilePaths)) {
+              $errors = @(Get-ArParseErrors -Path $sourceFile)
+              if ($errors.Count -gt 0) {
+                  $parseFailed = $true
+                  foreach ($errorRecord in $errors) {
+                      Write-Host ("PARSE ERROR {0}: {1}" -f $sourceFile, $errorRecord.Message)
+                  }
+              }
+          }
+          if ($parseFailed) { exit 1 }
+
+      - name: Build check
+        run: |
+          .\Build.ps1 -OutputPath _sandbox\gen.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Run test suite
-        shell: cmd
-        # -File keeps the exit code; the runner returns 1 when a test fails.
-        run: ${{ matrix.exe }} -NoProfile -ExecutionPolicy Bypass -File .\Tests\Run-Tests.ps1
+        run: |
+          .\Tests\Run-Tests.ps1 -NoBuild -Detailed
 
-      - name: Upload drift report
-        if: always()
+      - name: Upload sandbox artifact
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: sandbox-${{ matrix.name }}
-          path: _sandbox/gen.ps1
-          if-no-files-found: ignore
-          retention-days: 7
+          name: "sandbox-${{ github.run_number }}"
+          path: _sandbox
+
+  lint:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        run: |
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+              Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery
+          }
+
+      - name: Run PSScriptAnalyzer
+        run: |
+          $findings = Invoke-ScriptAnalyzer -Path src -Recurse -Settings .\PSScriptAnalyzerSettings.psd1 -Severity Error
+          if ($findings) { exit 1 }

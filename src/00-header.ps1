@@ -5,7 +5,15 @@
     [string]$option = '',
     [string]$shadow = '',
     [switch]$createuser,
-    [switch]$noclean
+    [switch]$noclean,
+    [string]$Target,
+    [string]$User,
+    [string]$Password,
+    [ValidateSet('control','view')][string]$Mode,
+    [switch]$Yes,
+    [string]$Config,
+    [switch]$List,
+    [switch]$ListJson
 )
 
 $ErrorActionPreference = 'Continue'
@@ -23,6 +31,20 @@ $script:ARLanguageArgument = [string]$lang
 $script:ARShadowPreference = ([string]$shadow).Trim().ToLowerInvariant()
 $script:ARInvokedFromOption = -not [string]::IsNullOrWhiteSpace($option)
 $script:AROptionValue = ([string]$option).Trim()
+
+if (-not (Get-Variable -Name ARAssumeYes -Scope Script -ErrorAction SilentlyContinue)) { $script:ARAssumeYes = $false }
+if (-not (Get-Variable -Name ARCliTarget -Scope Script -ErrorAction SilentlyContinue)) { $script:ARCliTarget = '' }
+if (-not (Get-Variable -Name ARCliUser -Scope Script -ErrorAction SilentlyContinue)) { $script:ARCliUser = '' }
+if (-not (Get-Variable -Name ARCliPassword -Scope Script -ErrorAction SilentlyContinue)) { $script:ARCliPassword = $null }
+if (-not (Get-Variable -Name ARCliMode -Scope Script -ErrorAction SilentlyContinue)) { $script:ARCliMode = '' }
+if (-not (Get-Variable -Name ARConfigPath -Scope Script -ErrorAction SilentlyContinue)) { $script:ARConfigPath = '' }
+
+if ($PSBoundParameters.ContainsKey('Target')) { $script:ARCliTarget = [string]$Target }
+if ($PSBoundParameters.ContainsKey('User')) { $script:ARCliUser = [string]$User }
+if ($PSBoundParameters.ContainsKey('Password')) { $script:ARCliPassword = [string]$Password }
+if ($PSBoundParameters.ContainsKey('Mode')) { $script:ARCliMode = [string]$Mode }
+if ($PSBoundParameters.ContainsKey('Config')) { $script:ARConfigPath = [string]$Config }
+if ($PSBoundParameters.ContainsKey('Yes')) { $script:ARAssumeYes = $true }
 
 # Bound-but-empty -option and stray positional/unknown tokens used to fall through to
 # interactive mode or into $args; both are argument errors and must fail loudly.
@@ -78,6 +100,16 @@ function Test-ARHeaderAdmin {
     } catch { return $false }
 }
 
+function Format-ARHeaderArgument {
+    param([string]$Value)
+    # Windows command-line rules: backslashes are literal except immediately before a
+    # quote, so a run in front of '"' doubles and the quote is escaped; a trailing run
+    # doubles so the closing quote is not swallowed by it.
+    $escaped = [regex]::Replace($Value, '(\\*)"', '$1$1\"')
+    $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+    return ('"' + $escaped + '"')
+}
+
 if ($script:ARIsWindows -and -not $script:ARNoAdmin -and -not (Test-ARHeaderAdmin)) {
     $launcher = ''
     if ($PSCommandPath) { $launcher = $PSCommandPath }
@@ -86,13 +118,24 @@ if ($script:ARIsWindows -and -not $script:ARNoAdmin -and -not (Test-ARHeaderAdmi
         Write-Host '[!] Administrator privileges are required.' -ForegroundColor Red
         exit 1
     }
+    # Generic forwarding: the child argument list is rebuilt from the parameters that
+    # were actually bound, so any switch added to the param block later survives
+    # elevation without this block changing. -noadmin is the elevation opt-out and is
+    # never forwarded; the child runs on the elevated token, Test-ARHeaderAdmin then
+    # returns true and the relaunch cannot recurse.
     $forward = New-Object System.Collections.Generic.List[string]
-    if ($script:ARNoGui) { $forward.Add('-nogui') }
-    if (-not [string]::IsNullOrWhiteSpace($script:ARLanguageArgument)) { $forward.Add('-lang'); $forward.Add($script:ARLanguageArgument) }
-    if (-not [string]::IsNullOrWhiteSpace($script:AROptionValue)) { $forward.Add('-option'); $forward.Add($script:AROptionValue) }
-    if (-not [string]::IsNullOrWhiteSpace($script:ARShadowPreference)) { $forward.Add('-shadow'); $forward.Add($script:ARShadowPreference) }
-    if ($script:ARCreateUser) { $forward.Add('-createuser') }
-    if ($script:ARNoClean) { $forward.Add('-noclean') }
+    foreach ($parameterName in $PSBoundParameters.Keys) {
+        if ($parameterName -eq 'noadmin') { continue }
+        $parameterValue = $PSBoundParameters[$parameterName]
+        if ($parameterValue -is [System.Management.Automation.SwitchParameter]) {
+            if ($parameterValue.IsPresent) { $forward.Add('-' + $parameterName) }
+            continue
+        }
+        $parameterText = [string]$parameterValue
+        if ([string]::IsNullOrEmpty($parameterText)) { continue }
+        $forward.Add('-' + $parameterName)
+        $forward.Add((Format-ARHeaderArgument $parameterText))
+    }
     $argumentList = @('-sta', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $launcher + '"'))
     foreach ($argument in $forward) { $argumentList += $argument }
     Write-Host '[i] Requesting administrator privileges...' -ForegroundColor Green

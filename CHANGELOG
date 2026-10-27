@@ -1,3 +1,25 @@
+# Versión 6.0 — wave 2
+• Trece acciones nuevas en el catálogo: 205 Lsass dump, 206 Sam dump, 207 Credential spray, 801 Enable RDP, 802 Defender exclusions, 803 AMSI bypass, 804 Shadow copies, 805 Event log clear, 901 File exfiltration, 902 Screenshot loop, 903 Clipboard watch, 904 Fast keylogger y 504 Persistence kit
+• El volcado de LSASS usa rundll32 con comsvcs.dll y descarga el .dmp al operador; el de SAM guarda las colmenas SAM, SYSTEM y SECURITY con reg save y las descarga igual
+• El spray de credenciales prueba una sola contraseña por cuenta y se detiene tras tres fallos seguidos, para no bloquear cuentas en el objetivo
+• 801 activa RDP y 802 añade exclusiones de Defender guardando antes cada valor; la limpieza reescribe el estado previo y vuelve a deshabilitar las reglas que se habilitaron
+• 804 expone una shadow copy nueva con mklink en C:\Windows\Temp y borra solo el enlace; 805 pide la palabra YES antes de vaciar nueve registros de eventos
+• 901 comprime una carpeta del objetivo con Compress-Archive y descarga el zip a loot\exfil; el archivo remoto se borra en un finally, también cuando la descarga falla
+• 902 captura N fotogramas cada T segundos por la ruta shot y los guarda como frame-NNN.jpg bajo loot\shots; 903 vigila el portapapeles de la sesión interactiva con una tarea programada y publica cada valor nuevo en un log que el operador lee cada N segundos
+• 904 registra las pulsaciones y replica el buffer cada 15 segundos en loot\keys; 504 instala a la vez un valor Run, una tarea de inicio de sesión y una suscripción WMI con nombres aleatorios, y su switch -Remove borra las tres vías
+• Filtro por nivel en el menú, con memoria independiente para categorías y acciones
+• Favoritos con F: la acción marcada sube al principio de su categoría y se guarda en last.json junto al idioma y al último perfil
+• Insignia [session] en las acciones que necesitan sesión, ayuda contextual F1 por nivel y tecla B para volver
+• Invoke-ARRemote reintenta solo los fallos de transporte, con espera exponencial y una reconexión entre intentos
+• Log a fichero en %LOCALAPPDATA%\AutoRDPwn\logs\, rotado a 5 MB, y barra de progreso para los bucles largos
+• Switches nuevos activos: -Target, -User, -Password y -Mode fijan el destino después de restaurar el perfil; -Config mezcla un JSON con Target, User, Password, Mode y Language; -List y -ListJson imprimen el catálogo y salen con 0; -Yes evita las confirmaciones de 804 y 805
+• -ListJson emite solo el array JSON del catálogo, sin menú ni tabla, y sale con 0; -List emite la tabla; los dos se resuelven antes de Initialize-ARDefender y de la interfaz
+• Resiliencia: TODO.md es la fuente durable de tareas, .opencode\scripts\sync-state.ps1 genera .opencode\state\todos.json y .opencode\state\workers.json guarda sesión, ficheros y brief de cada worker; una sesión nueva reconstruye el panel desde esos ficheros
+• Documentación nueva en docs\: USAGE, MODULES, SCREEN, CLI, ARCHITECTURE y TROUBLESHOOTING
+• CI en GitHub Actions (.github\workflows\tests.yml): parse de src\, build a _sandbox, suite completa en windows-latest y PSScriptAnalyzer con severidad Error; la suite offline cubre parse, catálogo, contratos, perfiles, runtime, ataques, regresión, localización y drift
+• Suite offline: 185 pruebas pasadas, 0 fallidas y 2 omitidas (drift del generado y el falso positivo conocido de Get-Command); la wave 2 añade Tests\Wave2.Tests.ps1 con los contratos de los 13 ids, los switches y los ficheros de estado
+
+
 # Versión 6.0
 • Ruta de pantalla reescrita: servidor de frames JPEG en la sesión interactiva del objetivo y visor WinForms en el operador, que descarga los fotogramas por HTTP en el puerto 8081
 • Sin inyección de DLL en el objetivo y sin conexión inversa: el objetivo ya no marca hacia el atacante

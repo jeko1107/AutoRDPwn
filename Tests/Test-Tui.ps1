@@ -66,7 +66,7 @@ $catalog = @(Get-ARActionCatalog)
 $actions = @($catalog | Where-Object { $_.Kind -eq 'Action' })
 $groups = @($catalog | Where-Object { $_.Kind -eq 'Group' })
 
-Assert-Equal -Actual $actions.Count -Expected 34 -Name 'catalog has 34 actions'
+Assert-Equal -Actual $actions.Count -Expected 47 -Name 'catalog has 47 actions'
 Assert-Equal -Actual $groups.Count -Expected 7 -Name 'catalog has 7 groups'
 
 $uniqueIds = @($actions | Select-Object -ExpandProperty Id -Unique)
@@ -80,7 +80,7 @@ $missingMetadata = @($actions | Where-Object {
 })
 Assert-Equal -Actual $missingMetadata.Count -Expected 0 -Name 'every action has id, title, description and handler'
 
-$badId = @($actions | Where-Object { $_.Id -notmatch '^[1-8]|^[1-7]\d\d$' })
+$badId = @($actions | Where-Object { $_.Id -notmatch '^[1-8]$|^[1-9]\d\d$' })
 Assert-Equal -Actual $badId.Count -Expected 0 -Name 'action IDs match the 1-8 / 3-digit scheme'
 
 foreach ($legacyKey in @('11', '12', '13', '14', '15', '16', '17')) {

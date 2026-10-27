@@ -10,3 +10,25 @@ AGENTS.MD
 opencode.json
 .opencode/
 OpenCode Infinite.bat
+
+# Exported credentials, dumps and screenshots from engagements. Never commit loot.
+loot/
+
+# Local run logs and scratch output.
+*.log
+
+# Memory dumps and registry dumps produced by the new actions.
+*.dmp
+*.hiv
+
+# Editor state.
+.vscode/
+.idea/
+
+# Scratch and backup files.
+*.tmp
+*.bak
+
+# Windows noise.
+Thumbs.db
+desktop.ini
