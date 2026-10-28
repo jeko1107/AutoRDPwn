@@ -1,3 +1,9 @@
+# Versión 6.0 — deuda de títulos (txt217 a txt225)
+
+• Nueve acciones anteriores a la wave 3 llevaban el título como cadena literal y por tanto no se traducían en ninguna interfaz: 101, 103, 301, 302, 303, 304, 501, 502 y 503
+• Las nueve pasan a Get-ARText con las claves txt217 a txt225, con el texto inglés como fallback, así que ninguna interfaz vuelve a mostrar inglés en esos ids
+• Las nueve claves traducidas en los siete idiomas: 226 a 235 claves por fichero, mismo juego y mismo orden en todos, UTF-8 con BOM y CRLF
+• El catálogo sigue en 83 acciones y 8 grupos; ids, handlers, descripciones y NeedsSession no cambian
 # Versión 6.0 — wave 3d (backdoors y persistencia)
 • Cinco acciones nuevas de persistencia dentro del grupo que ya existía, así que el catálogo sigue con ocho grupos y pasa de 78 a 83 acciones: 520 Startup shortcut, 521 SSH authorized_keys, 522 Service persistence, 523 Boot task y 524 WMI subscription
 • Las cinco declaran -NeedsSession $true, la misma puerta que el resto del grupo de persistencia (501 a 504, 901, 904): trabajan contra el objetivo por una sesión
