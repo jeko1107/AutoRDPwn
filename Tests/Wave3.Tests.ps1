@@ -1,9 +1,10 @@
 # Tests\Wave3.Tests.ps1
 #
-# Wave 3 contracts for the merge gate. Two packs share this file:
+# Wave 3 contracts for the merge gate. Three packs share this file:
 #
 #   group A, credential access, ids 220..229
 #   group B, discovery, ids 320..332
+#   group C, privilege escalation, ids 420..427
 #
 #   1. catalog: exactly one entry for every id in each pack, each mapped to its
 #      expected handler, each pack forming one contiguous block, no catalog id
@@ -14,7 +15,10 @@
 #      New-ARAction call is defined twice anywhere in src\.
 #   3. locale: each wave3 catalog entry carries a Get-ARText title key and that
 #      key resolves in all seven language files.
-#   4. source: every src\*.ps1 parses with zero errors.
+#   4. cleanup: the four group C handlers that write to the target name the
+#      collection they register with, and 426 deletes its service in a finally.
+#      The assertion is scoped to the handler's own AST extent, never src-wide.
+#   5. source: every src\*.ps1 parses with zero errors.
 #
 # Everything here is read-only: AST and raw text, src is never dot-sourced,
 # no catalog action ever runs, no target is contacted. Files are read with
@@ -55,6 +59,34 @@ function Get-ArWave3Definitions {
         }
     }
     return @($definitions.ToArray())
+}
+
+# One function definition's own source text, from the AST extent. A neighbour's
+# cleanup call never appears here, which is the point: the contract is scoped.
+function Get-ArWave3FunctionText {
+    param([Parameter(Mandatory = $true)]$Definition)
+    return [string]$Definition.Ast.Extent.Text
+}
+
+# The same extent with whole-line comments dropped, so a "# TODO: register in
+# $script:ARRemoteTasks" note cannot satisfy a registration contract. Inline
+# comments survive on purpose: stripping them needs a tokenizer and the gain is
+# nil, since the line has to carry real code to be a false positive anyway.
+function Get-ArWave3CodeText {
+    param([Parameter(Mandatory = $true)][string]$Text)
+    $kept = @($Text -split "`n" | Where-Object { -not ($_.TrimStart().StartsWith('#')) })
+    return ($kept -join "`n")
+}
+
+# Every finally block inside one function, concatenated; empty when the function
+# has no try/catch/finally at all.
+function Get-ArWave3FinallyText {
+    param([Parameter(Mandatory = $true)]$Definition)
+    $blocks = @($Definition.Ast.FindAll({
+        param($node)
+        ($node -is [System.Management.Automation.Language.TryStatementAst]) -and ($null -ne $node.Finally)
+    }, $true))
+    return (@($blocks | ForEach-Object { [string]$_.Finally.Extent.Text }) -join [Environment]::NewLine)
 }
 
 # Every $txtNNN assignment in one language file, as a sorted unique list.
@@ -140,14 +172,28 @@ $script:ArWave3DiscoveryTargets = @(
     [pscustomobject]@{ Id = '332'; Handler = 'Invoke-ARModulePatchAudit';     NeedsSession = $false }
 )
 
-# Both packs, for the checks that apply to every wave3 id.
-$script:ArWave3AllTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets)
+# The eight privilege-escalation ids of wave 3 group C. None of them opens an
+# interactive session; four of them write to the target and are covered by the
+# cleanup contract below.
+$script:ArWave3PrivEscTargets = @(
+    [pscustomobject]@{ Id = '420'; Handler = 'Invoke-ARModuleAlwaysInstallElevated'; NeedsSession = $false }
+    [pscustomobject]@{ Id = '421'; Handler = 'Invoke-ARModuleUnquotedServicePath';    NeedsSession = $false }
+    [pscustomobject]@{ Id = '422'; Handler = 'Invoke-ARModuleServicePermissions';     NeedsSession = $false }
+    [pscustomobject]@{ Id = '423'; Handler = 'Invoke-ARModulePotatoCheck';            NeedsSession = $false }
+    [pscustomobject]@{ Id = '424'; Handler = 'Invoke-ARModuleUacBypass';              NeedsSession = $false }
+    [pscustomobject]@{ Id = '425'; Handler = 'Invoke-ARModuleSystemTask';             NeedsSession = $false }
+    [pscustomobject]@{ Id = '426'; Handler = 'Invoke-ARModuleSystemService';          NeedsSession = $false }
+    [pscustomobject]@{ Id = '427'; Handler = 'Invoke-ARModuleBackdoorAccount';        NeedsSession = $false }
+)
+
+# Every pack, for the checks that apply to every wave3 id.
+$script:ArWave3AllTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets + $script:ArWave3PrivEscTargets)
 
 $script:ArWave3Rows = @(Get-ArWave3CatalogRows)
 
 # One pack, one contiguous run of ids: every id between the pack's first and
-# last is present, and nothing outside the pack leaks into that range. Both
-# packs are proven by the same code so a gap names the pack that owns it.
+# last is present, and nothing outside the pack leaks into that range. Every
+# pack is proven by the same code so a gap names the pack that owns it.
 function Assert-ArWave3ContiguousBlock {
     param(
         [Parameter(Mandatory = $true)]$Targets,
@@ -213,8 +259,13 @@ Describe 'wave3 catalog ids' {
             -Message 'the wave3 discovery ids are not the contiguous block 320..332'
     }
 
+    It 'declares the privilege-escalation ids as one contiguous block from 420 to 427' {
+        Assert-ArWave3ContiguousBlock -Targets $script:ArWave3PrivEscTargets `
+            -Message 'the wave3 privilege-escalation ids are not the contiguous block 420..427'
+    }
+
     # Global on purpose: it groups every New-ARAction row in src\*.ps1, so it
-    # covers both packs and any id outside them.
+    # covers every pack and any id outside them.
     It 'declares no catalog id twice' {
         $duplicates = @($script:ArWave3Rows | Group-Object Id | Where-Object { $_.Count -gt 1 })
         if ($duplicates.Count -eq 0) { return }
@@ -358,7 +409,66 @@ Describe 'wave3 locale keys' {
 }
 
 # --------------------------------------------------------------------------- #
-# contract 4 - the source parses
+# contract 4 - the group C writers name their cleanup mechanism in their body
+# --------------------------------------------------------------------------- #
+
+Describe 'wave3 cleanup contracts' {
+
+    # Each row is one handler that leaves something on the target. Pattern is
+    # matched against that handler's own source text; FinallyPattern, when set,
+    # must match inside a finally block of that same handler.
+    $script:ArWave3CleanupContracts = @(
+        [pscustomobject]@{
+            Id             = '424'
+            Handler        = 'Invoke-ARModuleUacBypass'
+            Mechanism      = 'ARRegistryBackup'
+            Pattern        = 'ARRegistryBackup'
+            FinallyPattern = $null
+        }
+        [pscustomobject]@{
+            Id             = '425'
+            Handler        = 'Invoke-ARModuleSystemTask'
+            Mechanism      = 'ARRemoteTasks'
+            Pattern        = 'ARRemoteTasks'
+            FinallyPattern = $null
+        }
+        [pscustomobject]@{
+            Id             = '426'
+            Handler        = 'Invoke-ARModuleSystemService'
+            Mechanism      = 'a services collection it adds the new service to, deleted in a finally'
+            Pattern        = '(?i)(\$(?:script:)?[A-Za-z]*Service[A-Za-z]*\s*(?:\.Add(?:Range)?\(|\+=)|(?:Register|Add|Track)-AR[A-Za-z]*Service)'
+            FinallyPattern = '(?i)(sc(?:\.exe)?\s+[''"]?delete|Remove-Service|Remove-AR[A-Za-z]*Service)'
+        }
+        [pscustomobject]@{
+            Id             = '427'
+            Handler        = 'Invoke-ARModuleBackdoorAccount'
+            Mechanism      = 'ARCreatedAccounts'
+            Pattern        = 'ARCreatedAccounts'
+            FinallyPattern = $null
+        }
+    )
+
+    foreach ($contract in $script:ArWave3CleanupContracts) {
+        $definitions = @(Get-ArWave3Definitions -Name $contract.Handler)
+        $testName = ('id {0} registers with {1} inside its own body' -f $contract.Id, $contract.Mechanism)
+        if ($definitions.Count -eq 0) {
+            It-Skip -Name $testName -Reason ('{0} is not defined anywhere in src\*.ps1 yet: the handler worker has not landed it, so there is no body to read for the cleanup contract' -f $contract.Handler)
+            continue
+        }
+        It $testName {
+            Assert-Equal 1 $definitions.Count ('{0} (id {1}) is defined {2} times; the cleanup contract reads exactly one body' -f $contract.Handler, $contract.Id, $definitions.Count)
+            $text = Get-ArWave3CodeText -Text (Get-ArWave3FunctionText -Definition $definitions[0])
+            Assert-Match $text $contract.Pattern ('id {0} ({1}) never names {2} in its own body, so whatever it writes to the target is not registered for cleanup' -f $contract.Id, $contract.Handler, $contract.Mechanism)
+            if ([string]::IsNullOrWhiteSpace([string]$contract.FinallyPattern)) { return }
+            $finallyText = Get-ArWave3FinallyText -Definition $definitions[0]
+            Assert-True (-not [string]::IsNullOrWhiteSpace($finallyText)) ('id {0} ({1}) has no try/catch/finally: the service it creates is never deleted on the failure path' -f $contract.Id, $contract.Handler)
+            Assert-Match $finallyText $contract.FinallyPattern ('id {0} ({1}) never deletes its service inside a finally block; a failed run leaves the SYSTEM service installed' -f $contract.Id, $contract.Handler)
+        }
+    }
+}
+
+# --------------------------------------------------------------------------- #
+# contract 5 - the source parses
 # --------------------------------------------------------------------------- #
 
 Describe 'wave3 source parses' {

@@ -1,7 +1,7 @@
 # Modules
 
 One section per catalog action, in catalog order, grouped by the category buckets
-that `Get-ARActionCategories` builds from the catalog. There are 70 actions.
+that `Get-ARActionCategories` builds from the catalog. There are 78 actions.
 
 Unless a section says otherwise, an action needs a target in the target editor
 and a working WinRM session (TCP 5985) to that target. "Leaves" lists what the
@@ -10,8 +10,9 @@ and `Invoke-ARCleanup`, which run from the `finally` block on exit. Actions that
 pull a file back write it under `%LOCALAPPDATA%\AutoRDPwn\loot\` on the operator
 and delete the remote copy.
 
-Actions 205 to 207, 220 to 229, 320 to 332, 801 to 805, 901 to 904 and 504 are
-implemented in `src\02-actions.ps1`. Read the handler before scripting against it.
+Actions 205 to 207, 220 to 229, 320 to 332, 420 to 427, 801 to 805, 901 to 904 and
+504 are implemented in `src\02-actions.ps1`. Read the handler before scripting
+against it.
 
 ## Quick actions
 
@@ -277,6 +278,46 @@ handler is where the exact fields of each row are defined.
 - Needs: a session.
 - Runs: copies `Invoke-PrivescCheck.ps1` and runs `Invoke-PrivescCheck` over services, tasks, permissions and patches.
 - Leaves: nothing; the temporary directory is removed in a `finally`.
+
+### 420-427. Privilege escalation pack
+
+Eight actions that either look for an escalation path or take one. The "needs"
+column is the catalog gate: all eight need a target in the target editor and all
+eight carry `-NeedsSession $false`. The split that matters is the one below the
+table: 420 to 423 only read the target, 424 to 427 write to it.
+
+| id | action | handler | what it needs |
+| --- | --- | --- | --- |
+| 420 | AlwaysInstallElevated | `Invoke-ARModuleAlwaysInstallElevated` | target; reads the `HKLM` and `HKCU` policy values, no session |
+| 421 | Unquoted service paths | `Invoke-ARModuleUnquotedServicePath` | target; reads `ImagePath` and folder ACLs, no session |
+| 422 | Service permissions | `Invoke-ARModuleServicePermissions` | target; reads the service DACLs for the running account, no session |
+| 423 | Potato check | `Invoke-ARModulePotatoCheck` | target; reads the token privileges of the running account, no session |
+| 424 | UAC bypass (fodhelper) | `Invoke-ARModuleUacBypass` | target; a non-elevated account and its `HKCU` hive, no session |
+| 425 | Run as SYSTEM (task) | `Invoke-ARModuleSystemTask` | target; administrative rights to register a task as SYSTEM, no session |
+| 426 | Run as SYSTEM (service) | `Invoke-ARModuleSystemService` | target; administrative rights to create and start a service, no session |
+| 427 | Backdoor account | `Invoke-ARModuleBackdoorAccount` | target; administrative rights to create a local account, no session |
+
+- Read-only: 420, 421, 422 and 423 change nothing on the target. They report a
+  policy value, an unquoted path with the folder that makes it writable, the
+  service DACL the running account holds, or the token privileges that make a
+  Potato attack viable.
+- Writers: 424 writes the `fodhelper.exe` command under `HKCU` and records the
+  previous values in `ARRegistryBackup`; 425 registers a scheduled task and adds
+  its name to `ARRemoteTasks`; 426 creates a LocalSystem service, keeps it in its
+  own services collection and deletes it in a `finally`; 427 creates a local
+  administrator account and adds it to `ARCreatedAccounts`.
+- Runs: each handler works over the same remote channel as the rest of the
+  catalog. The four writers create their artefact and register it with the
+  cleanup list from inside the same handler, so the list and the artefact cannot
+  drift apart.
+- Leaves: the registry values, the task, the service or the account. 424, 425
+  and 427 use the shared collections that `Invoke-ARCleanup` replays; 426 has no
+  shared services list, so the handler deletes its own service in the `finally`
+  and the deletion runs on the failure path too.
+- Note: 420 to 423 are the reconnaissance half of the pack and leave nothing
+  behind; 424 to 427 are the half that changes the host, and each of the four
+  names its cleanup mechanism in its own body (`Tests\Wave3.Tests.ps1` enforces
+  that).
 
 ## Other modules
 

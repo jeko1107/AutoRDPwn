@@ -1,3 +1,13 @@
+# Versión 6.0 — wave 3c (escalada de privilegios)
+• Ocho acciones nuevas de escalada de privilegios dentro del grupo que ya existía, así que el catálogo sigue con ocho grupos y pasa de 70 a 78 acciones: 420 AlwaysInstallElevated, 421 Unquoted service paths, 422 Service permissions, 423 Potato check, 424 UAC bypass (fodhelper), 425 Run as SYSTEM (task), 426 Run as SYSTEM (service) y 427 Backdoor account
+• Las ocho declaran -NeedsSession $false: trabajan contra el objetivo por el mismo canal remoto que el resto del catálogo, sin abrir una sesión interactiva
+• Cuatro son de sólo lectura y no dejan nada en el objetivo: 420 lee las directivas AlwaysInstallElevated de HKLM y HKCU, 421 lista servicios con ImagePath sin comillas bajo una carpeta escribible, 422 muestra los DACL de servicio que alcanza el usuario actual y 423 comprueba si el token tiene SeImpersonate o SeAssignPrimaryToken para un ataque Potato
+• Las otras cuatro escriben y registran su artefacto en el propio handler: 424 escribe la clave fodhelper en HKCU y guarda los valores previos en ARRegistryBackup, 425 registra una tarea como SYSTEM y la añade a ARRemoteTasks, 426 crea un servicio LocalSystem y lo borra en un finally, y 427 crea una cuenta local de administrador y la añade a ARCreatedAccounts
+• Claves de idioma nuevas: txt209 a txt216, con el mismo juego de 216 claves en los siete ficheros, BOM y CRLF conservados
+• docs\MODULES.md pasa a 78 acciones y gana la sección 420-427 con la tabla id / acción / handler / qué necesita, separando las cuatro de sólo lectura de las cuatro que escriben
+• Tests\Wave3.Tests.ps1 amplía los contratos a los ocho ids nuevos (entrada única, handler esperado, definición única, bloque contiguo 420-427, ningún id repetido, puerta de sesión y clave de título en los siete idiomas) y añade un contrato de limpieza que lee el cuerpo de 424, 425, 426 y 427 por AST y exige que cada uno nombre su mecanismo de limpieza, con el borrado del servicio dentro de un finally para 426
+• Tests\Test-Tui.ps1 pasa a esperar 78 acciones; los grupos siguen siendo 8
+
 # Versión 6.0 — wave 3b (descubrimiento)
 • Trece acciones nuevas de sólo lectura en el catálogo, en un grupo propio de descubrimiento: 320 Host audit, 321 AV and EDR enumeration, 322 SMB shares, 323 Local administrators, 324 Installed software, 325 Scheduled tasks, 326 Services, 327 Autoruns, 328 Domain information, 329 Network configuration, 330 ARP and connections, 331 SMB audit y 332 Patch audit
 • El catálogo pasa de 57 a 70 acciones; las trece declaran -NeedsSession $false y ninguna escribe en el objetivo, crea un fichero ni deja una tarea, así que no hay nada que limpiar

@@ -31,7 +31,7 @@ Describe 'catalog' {
     It 'documented action ids exist' {
         $documented = New-Object System.Collections.ArrayList
         foreach ($id in @(1, 2, 3, 4, 5, 6, 7, 8)) { $null = $documented.Add([string]$id) }
-        foreach ($range in @(@(101, 105), @(201, 204), @(301, 304), @(401, 403), @(501, 503), @(601, 603))) {
+        foreach ($range in @(@(101, 105), @(201, 204), @(301, 304), @(401, 403), @(420, 427), @(501, 503), @(601, 603))) {
             for ($id = $range[0]; $id -le $range[1]; $id++) { $null = $documented.Add([string]$id) }
         }
         # Extra ids are allowed (701-704 exist today); losing a documented one is not.

