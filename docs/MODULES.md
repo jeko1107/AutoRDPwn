@@ -1,7 +1,7 @@
 # Modules
 
 One section per catalog action, in catalog order, grouped by the category buckets
-that `Get-ARActionCategories` builds from the catalog. There are 78 actions.
+that `Get-ARActionCategories` builds from the catalog. There are 83 actions.
 
 Unless a section says otherwise, an action needs a target in the target editor
 and a working WinRM session (TCP 5985) to that target. "Leaves" lists what the
@@ -10,9 +10,9 @@ and `Invoke-ARCleanup`, which run from the `finally` block on exit. Actions that
 pull a file back write it under `%LOCALAPPDATA%\AutoRDPwn\loot\` on the operator
 and delete the remote copy.
 
-Actions 205 to 207, 220 to 229, 320 to 332, 420 to 427, 801 to 805, 901 to 904 and
-504 are implemented in `src\02-actions.ps1`. Read the handler before scripting
-against it.
+Actions 205 to 207, 220 to 229, 320 to 332, 420 to 427, 520 to 524, 801 to 805,
+901 to 904 and 504 are implemented in `src\02-actions.ps1`. Read the handler
+before scripting against it.
 
 ## Quick actions
 
@@ -261,6 +261,34 @@ handler is where the exact fields of each row are defined.
 - Needs: an elevated remote session; a target user for the logon task.
 - Runs: stages a heartbeat payload at `C:\Windows\Temp\W<8 hex>.ps1` that appends a timestamp to `C:\Windows\Temp\W<8 hex>.log` every 300 s for 288 iterations, then installs three activations: the Run value `ARDP_<6 hex>` under `HKCU:\Software\Microsoft\Windows\CurrentVersion\Run`, the logon task `AutoRDPwn<6 hex>`, and the WMI pair `__EventFilter AutoRDPwnF<6 hex>` + `CommandLineEventConsumer AutoRDPwnC<6 hex>`. Each success is appended to `$script:ARPersistenceItems`; the previous Run value is recorded in `$script:ARRegistryBackup` before the write. Handler: `Invoke-ARModulePersistenceKit`.
 - Cleanup: the handler's `-Remove` switch runs `Remove-ARPersistenceItems -IncludeUnknown`, which deletes the Run value, ends and unregisters the task, kills the payload process and drops the binding, consumer and filter. The sweep also matches `ARDP_*` values, `AutoRDPwn[A-F0-9]{6}` tasks and `AutoRDPwnF*`/`AutoRDPwnC*` WMI objects left by an interrupted install. Session cleanup calls the same removal path from `Remove-ARModuleArtifacts` and replays the registry backup.
+
+### 520-524. Persistence pack
+
+Five actions that survive a reboot by five different mechanisms. All five carry
+`-NeedsSession $true`, the same gate as the rest of this group: they work over a
+session against the target, and all five write to it, so each handler registers
+or removes its own artefact from inside its own body.
+
+| id | action | handler | what it needs |
+| --- | --- | --- | --- |
+| 520 | Startup shortcut | `Invoke-ARModuleStartupShortcut` | session; write access to the user's Startup folder |
+| 521 | SSH authorized_keys | `Invoke-ARModuleSshAuthorizedKeys` | session; a public key and write access to `%USERPROFILE%\.ssh` |
+| 522 | Service persistence | `Invoke-ARModuleServicePersistence` | session; administrative rights to create and start a service |
+| 523 | Boot task | `Invoke-ARModuleBootTask` | session; administrative rights to register a task that runs at boot |
+| 524 | WMI subscription | `Invoke-ARModuleWmiSubscription` | session; administrative rights over `root\subscription` |
+
+- Cleanup: 520 adds the shortcut it drops to `ARTemporaryFiles`; 521 takes a
+  backup copy of `authorized_keys` before appending the key and restores that
+  copy in a `finally`; 522 adds its service to `ARCreatedServices` and deletes it
+  in a `finally` with `sc.exe delete`; 523 adds the task name to `ARRemoteTasks`;
+  524 deletes `__EventFilter`, `CommandLineEventConsumer` and
+  `__FilterToConsumerBinding` in a `finally`.
+- Leaves: a Startup shortcut, an authorized key, an auto-start service, a boot
+  task or the WMI trio. 520, 522 and 523 use the shared collections that
+  `Invoke-ARCleanup` replays; 521 and 524 clean up inside the handler.
+- Note: each of the five names its own cleanup mechanism in its body
+  (`Tests\Wave3.Tests.ps1` enforces that), so the artefact and the tracker
+  cannot drift apart.
 
 ## Privilege escalation
 

@@ -1,3 +1,13 @@
+# Versión 6.0 — wave 3d (backdoors y persistencia)
+• Cinco acciones nuevas de persistencia dentro del grupo que ya existía, así que el catálogo sigue con ocho grupos y pasa de 78 a 83 acciones: 520 Startup shortcut, 521 SSH authorized_keys, 522 Service persistence, 523 Boot task y 524 WMI subscription
+• Las cinco declaran -NeedsSession $true, la misma puerta que el resto del grupo de persistencia (501 a 504, 901, 904): trabajan contra el objetivo por una sesión
+• Las cinco escriben en el objetivo y cada handler nombra su propia limpieza en su cuerpo: 520 añade el acceso directo a ARTemporaryFiles, 521 guarda una copia de authorized_keys antes de añadir la clave y la restaura en un finally, 522 añade el servicio a ARCreatedServices y lo borra en un finally con sc.exe delete, 523 añade el nombre de la tarea a ARRemoteTasks y 524 borra __EventFilter, CommandLineEventConsumer y __FilterToConsumerBinding en un finally
+• Claves de idioma nuevas: txt226 a txt235, con el mismo juego de 226 claves en los siete ficheros, BOM y CRLF conservados
+• docs\MODULES.md pasa a 83 acciones y gana la sección 520-524 con la tabla id / acción / handler / qué necesita y la nota de limpieza de cada mecanismo
+• Tests\Wave3.Tests.ps1 amplía el pack de persistencia (entrada única, handler esperado, definición única, bloque contiguo 520-524, puerta de sesión, clave de título en los siete idiomas) y añade cinco contratos de limpieza; mientras las entradas del catálogo no hayan aterrizado, el bloque contiguo y los handlers salen como skip, nunca como fallo
+• Tests\Test-Tui.ps1 pasa a esperar 83 acciones; los grupos siguen siendo 8
+• Tests\Catalog.Tests.ps1 no cambia: no lleva el total hardcodeado, solo el rango de ids documentados
+
 # Versión 6.0 — wave 3c (escalada de privilegios)
 • Ocho acciones nuevas de escalada de privilegios dentro del grupo que ya existía, así que el catálogo sigue con ocho grupos y pasa de 70 a 78 acciones: 420 AlwaysInstallElevated, 421 Unquoted service paths, 422 Service permissions, 423 Potato check, 424 UAC bypass (fodhelper), 425 Run as SYSTEM (task), 426 Run as SYSTEM (service) y 427 Backdoor account
 • Las ocho declaran -NeedsSession $false: trabajan contra el objetivo por el mismo canal remoto que el resto del catálogo, sin abrir una sesión interactiva

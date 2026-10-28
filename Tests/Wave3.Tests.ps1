@@ -1,24 +1,34 @@
 # Tests\Wave3.Tests.ps1
 #
-# Wave 3 contracts for the merge gate. Three packs share this file:
+# Wave 3 contracts for the merge gate. Four packs share this file:
 #
 #   group A, credential access, ids 220..229
 #   group B, discovery, ids 320..332
 #   group C, privilege escalation, ids 420..427
+#   group D, backdoors and persistence, ids 520..524
 #
 #   1. catalog: exactly one entry for every id in each pack, each mapped to its
 #      expected handler, each pack forming one contiguous block, no catalog id
 #      declared twice, and every id gated with -NeedsSession $false except 227
-#      (Kerberos cache runs against a live session).
+#      (Kerberos cache runs against a live session) and the 520..524 pack, which
+#      needs a session like the rest of the persistence group. Group D is gated
+#      on its landing state: while no 520..524 row exists in the catalog the pack
+#      is one Skip that names it, and from the first landed id the whole pack is
+#      enforced. Published packs A, B and C carry no such gate.
 #   2. handlers: every wave3 handler is defined exactly once across src\*.ps1
 #      (AST function definitions, never grep), and no handler named by any
 #      New-ARAction call is defined twice anywhere in src\.
 #   3. locale: each wave3 catalog entry carries a Get-ARText title key and that
 #      key resolves in all seven language files.
-#   4. cleanup: the four group C handlers that write to the target name the
-#      collection they register with, and 426 deletes its service in a finally.
-#      The assertion is scoped to the handler's own AST extent, never src-wide.
-#   5. source: every src\*.ps1 parses with zero errors.
+#   4. cleanup: the nine wave3 handlers that write to the target name the
+#      mechanism they register with, and 426, 521 and 524 clean up inside a
+#      finally. The assertion is scoped to the handler's own AST extent, never
+#      src-wide.
+#   5. arguments: no remote call splats a collection into its own argument list.
+#      -ArgumentList $array and -ArgumentList @($array.ToArray()) both hand the
+#      scriptblock only element 0, which silently halves every cleanup loop.
+#      The unary comma, (, $array), is the only shape that keeps the array whole.
+#   6. source: every src\*.ps1 parses with zero errors.
 #
 # Everything here is read-only: AST and raw text, src is never dot-sourced,
 # no catalog action ever runs, no target is contacted. Files are read with
@@ -186,10 +196,36 @@ $script:ArWave3PrivEscTargets = @(
     [pscustomobject]@{ Id = '427'; Handler = 'Invoke-ARModuleBackdoorAccount';        NeedsSession = $false }
 )
 
+# The five persistence ids of wave 3d. All five carry -NeedsSession $true, the
+# same gate as the rest of the persistence group (501..504, 901, 904): they write
+# to the target over a session. All five are covered by the cleanup contract.
+$script:ArWave3PersistenceTargets = @(
+    [pscustomobject]@{ Id = '520'; Handler = 'Invoke-ARModuleStartupShortcut';   NeedsSession = $true }
+    [pscustomobject]@{ Id = '521'; Handler = 'Invoke-ARModuleSshAuthorizedKeys'; NeedsSession = $true }
+    [pscustomobject]@{ Id = '522'; Handler = 'Invoke-ARModuleServicePersistence'; NeedsSession = $true }
+    [pscustomobject]@{ Id = '523'; Handler = 'Invoke-ARModuleBootTask';          NeedsSession = $true }
+    [pscustomobject]@{ Id = '524'; Handler = 'Invoke-ARModuleWmiSubscription';   NeedsSession = $true }
+)
+
 # Every pack, for the checks that apply to every wave3 id.
-$script:ArWave3AllTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets + $script:ArWave3PrivEscTargets)
+$script:ArWave3AllTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets + $script:ArWave3PrivEscTargets + $script:ArWave3PersistenceTargets)
 
 $script:ArWave3Rows = @(Get-ArWave3CatalogRows)
+
+# Landing gate for the pack whose catalog worker writes in the same window as
+# this file. Packs A, B and C are published, so they stay strict: a missing id is
+# a failure, never a skip. Group D is still in flight, so an empty pack is a
+# Skip that names it; the first id that lands puts the whole pack under contract.
+$script:ArWave3PersistenceLanded = @($script:ArWave3PersistenceTargets | Where-Object {
+        $id = $_.Id
+        @($script:ArWave3Rows | Where-Object { $_.Id -eq $id }).Count -gt 0
+    }).Count -gt 0
+
+# The packs the catalog tests enforce. Group D joins only once it has landed.
+$script:ArWave3CatalogTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets + $script:ArWave3PrivEscTargets)
+if ($script:ArWave3PersistenceLanded) {
+    $script:ArWave3CatalogTargets = @($script:ArWave3CatalogTargets + $script:ArWave3PersistenceTargets)
+}
 
 # One pack, one contiguous run of ids: every id between the pack's first and
 # last is present, and nothing outside the pack leaks into that range. Every
@@ -223,7 +259,7 @@ Describe 'wave3 catalog ids' {
 
     It 'declares exactly one catalog entry for every wave3 id' {
         $problems = New-Object System.Collections.ArrayList
-        foreach ($target in $script:ArWave3AllTargets) {
+        foreach ($target in $script:ArWave3CatalogTargets) {
             $located = @($script:ArWave3Rows | Where-Object { $_.Id -eq $target.Id })
             if ($located.Count -eq 0) {
                 $null = $problems.Add(('id {0} is not in the catalog: no New-ARAction -Id ''{0}'' call anywhere in src\*.ps1' -f $target.Id))
@@ -239,7 +275,7 @@ Describe 'wave3 catalog ids' {
 
     It 'maps every wave3 id to its expected handler' {
         $problems = New-Object System.Collections.ArrayList
-        foreach ($target in $script:ArWave3AllTargets) {
+        foreach ($target in $script:ArWave3CatalogTargets) {
             $located = @($script:ArWave3Rows | Where-Object { $_.Id -eq $target.Id })
             if ($located.Count -ne 1) { continue }   # absence and duplication belong to the test above
             if ([string]$located[0].Handler -ceq $target.Handler) { continue }
@@ -264,6 +300,17 @@ Describe 'wave3 catalog ids' {
             -Message 'the wave3 privilege-escalation ids are not the contiguous block 420..427'
     }
 
+    if (-not $script:ArWave3PersistenceLanded) {
+        It-Skip -Name 'declares the persistence ids as one contiguous block from 520 to 524' `
+            -Reason 'the wave3 persistence catalog entries (ids 520..524) are not in src\*.ps1 yet: the catalog worker has not landed them. From the first landed id this block is enforced whole'
+    }
+    else {
+        It 'declares the persistence ids as one contiguous block from 520 to 524' {
+            Assert-ArWave3ContiguousBlock -Targets $script:ArWave3PersistenceTargets `
+                -Message 'the wave3 persistence ids are not the contiguous block 520..524'
+        }
+    }
+
     # Global on purpose: it groups every New-ARAction row in src\*.ps1, so it
     # covers every pack and any id outside them.
     It 'declares no catalog id twice' {
@@ -277,7 +324,7 @@ Describe 'wave3 catalog ids' {
 
     It 'gates the wave3 ids on a session only where the contract says so' {
         $problems = New-Object System.Collections.ArrayList
-        foreach ($target in $script:ArWave3AllTargets) {
+        foreach ($target in $script:ArWave3CatalogTargets) {
             $located = @($script:ArWave3Rows | Where-Object { $_.Id -eq $target.Id })
             if ($located.Count -ne 1) { continue }
             if ($located[0].NeedsSession -eq $target.NeedsSession) { continue }
@@ -409,14 +456,16 @@ Describe 'wave3 locale keys' {
 }
 
 # --------------------------------------------------------------------------- #
-# contract 4 - the group C writers name their cleanup mechanism in their body
+# contract 4 - the group C and D writers name their cleanup mechanism in their
+# own body
 # --------------------------------------------------------------------------- #
 
 Describe 'wave3 cleanup contracts' {
 
     # Each row is one handler that leaves something on the target. Pattern is
-    # matched against that handler's own source text; FinallyPattern, when set,
-    # must match inside a finally block of that same handler.
+    # matched against that handler's own source text; FinallyPattern (or each
+    # entry of FinallyPatterns), when set, must match inside a finally block of
+    # that same handler.
     $script:ArWave3CleanupContracts = @(
         [pscustomobject]@{
             Id             = '424'
@@ -424,6 +473,7 @@ Describe 'wave3 cleanup contracts' {
             Mechanism      = 'ARRegistryBackup'
             Pattern        = 'ARRegistryBackup'
             FinallyPattern = $null
+            FinallyPatterns = @()
         }
         [pscustomobject]@{
             Id             = '425'
@@ -431,6 +481,7 @@ Describe 'wave3 cleanup contracts' {
             Mechanism      = 'ARRemoteTasks'
             Pattern        = 'ARRemoteTasks'
             FinallyPattern = $null
+            FinallyPatterns = @()
         }
         [pscustomobject]@{
             Id             = '426'
@@ -438,6 +489,7 @@ Describe 'wave3 cleanup contracts' {
             Mechanism      = 'a services collection it adds the new service to, deleted in a finally'
             Pattern        = '(?i)(\$(?:script:)?[A-Za-z]*Service[A-Za-z]*\s*(?:\.Add(?:Range)?\(|\+=)|(?:Register|Add|Track)-AR[A-Za-z]*Service)'
             FinallyPattern = '(?i)(sc(?:\.exe)?\s+[''"]?delete|Remove-Service|Remove-AR[A-Za-z]*Service)'
+            FinallyPatterns = @()
         }
         [pscustomobject]@{
             Id             = '427'
@@ -445,6 +497,47 @@ Describe 'wave3 cleanup contracts' {
             Mechanism      = 'ARCreatedAccounts'
             Pattern        = 'ARCreatedAccounts'
             FinallyPattern = $null
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '520'
+            Handler        = 'Invoke-ARModuleStartupShortcut'
+            Mechanism      = 'ARTemporaryFiles'
+            Pattern        = 'ARTemporaryFiles'
+            FinallyPattern = $null
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '521'
+            Handler        = 'Invoke-ARModuleSshAuthorizedKeys'
+            Mechanism      = 'a backup copy of authorized_keys restored in a finally'
+            Pattern        = '(?i)(?=[\s\S]*authorized_keys)(?=[\s\S]*(?:\.bak|Backup|Copy-Item))'
+            FinallyPattern = '(?i)(Move-Item|Copy-Item|Remove-Item|Set-Content|Add-Content|Restore)'
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '522'
+            Handler        = 'Invoke-ARModuleServicePersistence'
+            Mechanism      = 'ARCreatedServices, with the service deleted in a finally'
+            Pattern        = 'ARCreatedServices'
+            FinallyPattern = '(?i)(sc(?:\.exe)?\s+[''"]?delete|Remove-Service|Remove-AR[A-Za-z]*Service)'
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '523'
+            Handler        = 'Invoke-ARModuleBootTask'
+            Mechanism      = 'ARRemoteTasks'
+            Pattern        = 'ARRemoteTasks'
+            FinallyPattern = $null
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '524'
+            Handler        = 'Invoke-ARModuleWmiSubscription'
+            Mechanism      = 'the filter, consumer and binding it creates, deleted in a finally'
+            Pattern        = '(?i)(?=[\s\S]*__EventFilter)(?=[\s\S]*CommandLineEventConsumer)(?=[\s\S]*__FilterToConsumerBinding)'
+            FinallyPattern = $null
+            FinallyPatterns = @('__EventFilter', 'CommandLineEventConsumer', '__FilterToConsumerBinding')
         }
     )
 
@@ -459,11 +552,82 @@ Describe 'wave3 cleanup contracts' {
             Assert-Equal 1 $definitions.Count ('{0} (id {1}) is defined {2} times; the cleanup contract reads exactly one body' -f $contract.Handler, $contract.Id, $definitions.Count)
             $text = Get-ArWave3CodeText -Text (Get-ArWave3FunctionText -Definition $definitions[0])
             Assert-Match $text $contract.Pattern ('id {0} ({1}) never names {2} in its own body, so whatever it writes to the target is not registered for cleanup' -f $contract.Id, $contract.Handler, $contract.Mechanism)
-            if ([string]::IsNullOrWhiteSpace([string]$contract.FinallyPattern)) { return }
+            $finallyPatterns = @()
+            if (-not [string]::IsNullOrWhiteSpace([string]$contract.FinallyPattern)) {
+                $finallyPatterns += [string]$contract.FinallyPattern
+            }
+            foreach ($extraPattern in @($contract.FinallyPatterns)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$extraPattern)) { $finallyPatterns += [string]$extraPattern }
+            }
+            if ($finallyPatterns.Count -eq 0) { return }
             $finallyText = Get-ArWave3FinallyText -Definition $definitions[0]
-            Assert-True (-not [string]::IsNullOrWhiteSpace($finallyText)) ('id {0} ({1}) has no try/catch/finally: the service it creates is never deleted on the failure path' -f $contract.Id, $contract.Handler)
-            Assert-Match $finallyText $contract.FinallyPattern ('id {0} ({1}) never deletes its service inside a finally block; a failed run leaves the SYSTEM service installed' -f $contract.Id, $contract.Handler)
+            Assert-True (-not [string]::IsNullOrWhiteSpace($finallyText)) ('id {0} ({1}) has no try/catch/finally: what it writes to the target is never removed on the failure path' -f $contract.Id, $contract.Handler)
+            foreach ($finallyPattern in $finallyPatterns) {
+                Assert-Match $finallyText $finallyPattern ('id {0} ({1}) does not clean up {2} inside a finally block; a failed run leaves it on the target' -f $contract.Id, $contract.Handler, $contract.Mechanism)
+            }
         }
+    }
+}
+
+# --------------------------------------------------------------------------- #
+# contract 6 - a remote call never splats a collection into its own arguments
+# --------------------------------------------------------------------------- #
+
+Describe 'wave3 remote argument contracts' {
+
+    # Invoke-Command -ArgumentList $array hands element 0 to the scriptblock's
+    # first parameter and drops the rest, so a cleanup loop silently restores one
+    # value out of many. The unary comma, (, $array), keeps the array whole.
+    # Measured on this machine: a naked 3-element array arrives as one String,
+    # (, $array) arrives as one Object[] with all three.
+    It 'keeps a collection argument intact with the unary comma' {
+        $problems = New-Object System.Collections.ArrayList
+        $remoteNames = @('Invoke-ARRemote', 'Invoke-Command')
+
+        foreach ($source in @(Get-ArSourceAsts)) {
+            foreach ($definition in @($source.Ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
+            }, $true))) {
+                $functionText = [string]$definition.Extent.Text
+
+                foreach ($remoteName in $remoteNames) {
+                    foreach ($command in @($definition.FindAll({
+                        param($node)
+                        ($node -is [System.Management.Automation.Language.CommandAst]) -and
+                        ($node.GetCommandName() -eq $remoteName)
+                    }, $true))) {
+                        $elements = @($command.CommandElements)
+                        for ($index = 1; $index -lt $elements.Count; $index++) {
+                            $element = $elements[$index]
+                            if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) { continue }
+                            if ($element.ParameterName -ne 'ArgumentList') { continue }
+                            $value = $null
+                            if ($null -ne $element.Argument) { $value = $element.Argument }
+                            elseif ($index + 1 -lt $elements.Count) { $value = $elements[$index + 1] }
+                            if ($null -eq $value) { continue }
+
+                            $text = [string]$value.Extent.Text
+                            $splats = $false
+                            if ($text -match '^@\([^,]*\.ToArray\(\)\)$') { $splats = $true }
+                            elseif ($text -match '^\$([A-Za-z_][A-Za-z0-9_]*)$') {
+                                # A real statement, not a param-block default such as
+                                # [object[]]$ArgumentList = @(), which is the transport
+                                # passing its own parameter list through on purpose.
+                                $assignment = '(?m)^[ \t]*\$' + [regex]::Escape($Matches[1]) + '[ \t]*=[ \t]*@\('
+                                $splats = [regex]::IsMatch($functionText, $assignment)
+                            }
+                            if (-not $splats) { continue }
+
+                            $null = $problems.Add(('{0}:{1}: -ArgumentList {2} splats the collection, so only its first item reaches the scriptblock; write (, {2}) instead' -f (Split-Path -Leaf $source.File), $command.Extent.StartLineNumber, $text))
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($problems.Count -eq 0) { return }
+        throw ('a remote call splats a collection into its own arguments, so every item after the first is silently dropped: ' + ($problems -join ' | '))
     }
 }
 

