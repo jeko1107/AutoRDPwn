@@ -1,3 +1,16 @@
+# Versión 6.0 — wave 3f (RDP)
+• Seis acciones nuevas de RDP dentro del grupo que ya existía, así que el catálogo sigue con nueve grupos y pasa de 88 a 94 acciones: 720 RDP sessions, 721 RDP disconnect, 722 RDP NLA off, 723 RDP brute force, 724 RDP certificate y 725 RDP file
+• Las seis viven en Remote Access, detrás de 801 Enable RDP, y ninguna usa título literal: todo por Get-ARText, con las claves nuevas txt248 a txt259
+• 720 y 724 declaran -NeedsSession $false: leen por WinRM sin sesión interactiva; 721, 722, 723 y 725 declaran -NeedsSession $true porque manejan la sesión, el servicio o un fichero del operador
+• 720 lista las sesiones con query session y su equivalente CIM; 721 desconecta o cierra la sesión elegida sin tocar TermService y reporta la sesión y su estado final; 724 lee la huella y la caducidad del certificado RDP
+• 722 guarda el valor previo de UserAuthentication en $script:ARRegistryBackup, escribe 0 en RDP-Tcp y repone el valor en un finally; -Remove restaura, y el handler avisa del reinicio necesario
+• 723 se niega a correr sin -Yes ($script:ARAssumeYes), con tope duro de intentos, espera entre ellos y aborto si detecta bloqueo de la cuenta; no escribe nada en el objetivo
+• 725 genera el .rdp con los ajustes actuales del objetivo, lo escribe solo en el operador (directorio de botín o _sandbox\) y devuelve la ruta
+• Claves de idioma nuevas: txt248 a txt259 (seis pares título/descripción), con el mismo juego de 259 claves en los siete ficheros, BOM y CRLF conservados
+• docs\MODULES.md pasa a 94 acciones y gana la sección 720-725 dentro de Remote Access, detrás de 801, con la tabla id / acción / handler / qué necesita y la nota de limpieza de cada mecanismo
+• Tests\Wave3.Tests.ps1 amplía el pack RDP (entrada única, handler esperado, definición única, bloque contiguo 720-725, puerta de sesión y clave de título en los siete idiomas), añade seis filas de limpieza —722 el valor de registro repuesto en un finally, 723 la puerta de -Yes, 725 la escritura solo en el operador, y 720, 721 y 724 declaradas sin estado— y deja la misma puerta de aterrizaje que los packs D y E
+• Tests\Test-Tui.ps1 pasa a esperar 94 acciones; los grupos siguen siendo 9
+
 # Versión 6.0 — wave 3e (movimiento lateral)
 • Cinco acciones nuevas de movimiento lateral en un grupo propio, el noveno del catálogo: el catálogo pasa de 83 a 88 acciones y de 8 a 9 grupos, con 620 Pivot proxy, 621 SOCKS over WinRM, 622 Remote share mount, 623 PsExec hop y 624 WinRM hop
 • Las cinco declaran -NeedsSession $true: usan el objetivo actual como puente hacia un segundo host o hacia un servicio que el objetivo alcanza, y cuatro de ellas abren o tunelan un segundo canal desde ahí

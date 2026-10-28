@@ -1,7 +1,7 @@
 # Modules
 
 One section per catalog action, in catalog order, grouped by the category buckets
-that `Get-ARActionCategories` builds from the catalog. There are 88 actions.
+that `Get-ARActionCategories` builds from the catalog. There are 94 actions.
 
 Unless a section says otherwise, an action needs a target in the target editor
 and a working WinRM session (TCP 5985) to that target. "Leaves" lists what the
@@ -11,8 +11,8 @@ pull a file back write it under `%LOCALAPPDATA%\AutoRDPwn\loot\` on the operator
 and delete the remote copy.
 
 Actions 205 to 207, 220 to 229, 320 to 332, 420 to 427, 520 to 524, 620 to 624,
-801 to 805, 901 to 904 and 504 are implemented in `src\02-actions.ps1`. Read the
-handler before scripting against it.
+720 to 725, 801 to 805, 901 to 904 and 504 are implemented in `src\02-actions.ps1`.
+Read the handler before scripting against it.
 
 ## Quick actions
 
@@ -87,6 +87,40 @@ handler before scripting against it.
 - Needs: administrator rights, a session, TCP 5985.
 - Runs: snapshots and writes `fDenyTSConnections=0`, `LocalAccountTokenFilterPolicy=1` and `RDP-Tcp\UserAuthentication=0`; enables every disabled firewall rule attached to the `TermService` service, or, when none was enabled, enables or creates `AutoRDPwn-RDP-In` for TCP 3389.
 - Leaves: the registry values replayed from the snapshot by cleanup, the created rule deleted by cleanup, and the rules it re-enabled set back to disabled through `$script:ARFirewallRestore`. Prints `Registry values were already in the required state.` and writes nothing when a fresh target already allows RDP.
+
+### 720-725. RDP pack
+
+Six actions that read and drive RDP on the target. The pack sits inside this
+group, behind 801. The "needs" column is the catalog gate: 720 and 724 read the
+target over WinRM with no interactive session, and 721, 722, 723 and 725 carry
+`-NeedsSession $true`.
+
+| id | action | handler | what it needs |
+| --- | --- | --- | --- |
+| 720 | RDP sessions | `Invoke-ARAttackRdpSessions` | target; `query session` plus the CIM equivalent, no session |
+| 721 | RDP disconnect | `Invoke-ARAttackRdpDisconnect` | session; a session id and an explicit confirmation |
+| 722 | RDP NLA off | `Invoke-ARAttackRdpNlaOff` | session; administrative rights over `RDP-Tcp`, and a restart to apply |
+| 723 | RDP brute force | `Invoke-ARAttackRdpBrute` | session; an account, a short password list and `-Yes` |
+| 724 | RDP certificate | `Invoke-ARAttackRdpCertificate` | target; the certificate thumbprint and expiry, no session |
+| 725 | RDP file | `Invoke-ARAttackRdpFile` | session; the current target settings, saved as a `.rdp` |
+
+- Runs: 720 prints id, user, state and type for every session. 721 disconnects or
+  logs off the session the operator picks, and reports the session and its final
+  state; it never stops `TermService`. 722 writes `UserAuthentication=0` under
+  `RDP-Tcp` after saving the previous value, and says the box needs a restart. 723
+  tries a short password list against one account with a hard cap on attempts and
+  a wait between them, and aborts when the account locks out. 724 reads the RDP
+  certificate. 725 writes a `.rdp` file with the target's current settings and
+  prints its path.
+- Cleanup: 722 records the previous value in `$script:ARRegistryBackup` before the
+  write and replays it in a `finally`, and `-Remove` restores it; 725 writes only
+  on the operator, under the loot directory or `_sandbox\`, so nothing is left on
+  the target; 723 refuses without `-Yes` and writes nothing at all. 720, 721 and
+  724 leave no service, task, registry value or file behind.
+- Note: `Tests\Wave3.Tests.ps1` enforces the teardown of 722, the `-Yes` gate of
+  723 and the operator-only write of 725; for 720, 721 and 724 it asserts that
+  there is no state to register, so a later edit that starts writing on the target
+  fails the contract instead of leaking quietly.
 
 ## Passwords and hashes
 

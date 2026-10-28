@@ -2,7 +2,7 @@
 
 AutoRDPwn is a PowerShell post-exploitation framework for Windows. It automates
 the Shadow attack — a SYSTEM scheduled task that opens a console session on the
-remote host — and puts 88 actions behind one menu: remote execution, shells,
+remote host — and puts 94 actions behind one menu: remote execution, shells,
 credential extraction, pivoting, lateral movement, desktop forensics,
 persistence, collection and privilege escalation.
 
@@ -115,6 +115,12 @@ opens contextual help, `Q` or `X` quits.
 | 104 | Remote Access | Netcat console (direct connection) |
 | 105 | Remote Access | Netcat console (reverse connection) |
 | 801 | Remote Access | Enable RDP |
+| 720 | Remote Access | RDP sessions |
+| 721 | Remote Access | RDP disconnect |
+| 722 | Remote Access | RDP NLA off |
+| 723 | Remote Access | RDP brute force |
+| 724 | Remote Access | RDP certificate |
+| 725 | Remote Access | RDP file |
 | 201 | Passwords and hashes | Extract local hashes with Mimikatz |
 | 202 | Passwords and hashes | Extract system passwords with Mimikatz |
 | 203 | Passwords and hashes | Obtain browsers passwords with SharpWeb |

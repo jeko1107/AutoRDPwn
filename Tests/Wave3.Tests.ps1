@@ -1,22 +1,25 @@
 # Tests\Wave3.Tests.ps1
 #
-# Wave 3 contracts for the merge gate. Five packs share this file:
+# Wave 3 contracts for the merge gate. Six packs share this file:
 #
 #   group A, credential access, ids 220..229
 #   group B, discovery, ids 320..332
 #   group C, privilege escalation, ids 420..427
 #   group D, backdoors and persistence, ids 520..524
 #   group E, lateral movement, ids 620..624
+#   group F, RDP, ids 720..725
 #
 #   1. catalog: exactly one entry for every id in each pack, each mapped to its
 #      expected handler, each pack forming one contiguous block, no catalog id
 #      declared twice, and every id gated with -NeedsSession $false except 227
 #      (Kerberos cache runs against a live session), the 520..524 pack and the
-#      620..624 pack, which need a session like the rest of their groups. Groups
-#      D and E are gated on their landing state: while no 520..524 (or 620..624)
-#      row exists in the catalog the pack is one Skip that names it, and from the
-#      first landed id the whole pack is enforced. Published packs A, B and C
-#      carry no such gate.
+#      620..624 pack, which need a session like the rest of their groups, and
+#      721/722/723/725, which drive the target over a session while 720 and 724
+#      read it over WinRM without one. Groups D, E and F are gated on their
+#      landing state: while no 520..524 (or 620..624, or 720..725) row exists in
+#      the catalog the pack is one Skip that names it, and from the first landed
+#      id the whole pack is enforced. Published packs A, B and C carry no such
+#      gate.
 #   2. handlers: every wave3 handler is defined exactly once across src\*.ps1
 #      (AST function definitions, never grep), and no handler named by any
 #      New-ARAction call is defined twice anywhere in src\.
@@ -220,15 +223,30 @@ $script:ArWave3LateralTargets = @(
     [pscustomobject]@{ Id = '624'; Handler = 'Invoke-ARModuleHopWinRm';       NeedsSession = $true }
 )
 
+# The six RDP ids of wave 3f. The pack lives inside the existing Remote Access
+# group, behind 801 Enable RDP. 720 and 724 read the target over WinRM without an
+# interactive session; 721, 722, 723 and 725 drive it and carry -NeedsSession
+# $true. Only 722 (a registry value), 723 (a confirmation gate) and 725 (a file
+# on the operator) are covered by the cleanup contract: 720, 721 and 724 leave no
+# state behind.
+$script:ArWave3RdpTargets = @(
+    [pscustomobject]@{ Id = '720'; Handler = 'Invoke-ARAttackRdpSessions';    NeedsSession = $false }
+    [pscustomobject]@{ Id = '721'; Handler = 'Invoke-ARAttackRdpDisconnect';  NeedsSession = $true }
+    [pscustomobject]@{ Id = '722'; Handler = 'Invoke-ARAttackRdpNlaOff';      NeedsSession = $true }
+    [pscustomobject]@{ Id = '723'; Handler = 'Invoke-ARAttackRdpBrute';       NeedsSession = $true }
+    [pscustomobject]@{ Id = '724'; Handler = 'Invoke-ARAttackRdpCertificate'; NeedsSession = $false }
+    [pscustomobject]@{ Id = '725'; Handler = 'Invoke-ARAttackRdpFile';        NeedsSession = $true }
+)
+
 # Every pack, for the checks that apply to every wave3 id.
-$script:ArWave3AllTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets + $script:ArWave3PrivEscTargets + $script:ArWave3PersistenceTargets + $script:ArWave3LateralTargets)
+$script:ArWave3AllTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets + $script:ArWave3PrivEscTargets + $script:ArWave3PersistenceTargets + $script:ArWave3LateralTargets + $script:ArWave3RdpTargets)
 
 $script:ArWave3Rows = @(Get-ArWave3CatalogRows)
 
 # Landing gate for the pack whose catalog worker writes in the same window as
 # this file. Packs A, B and C are published, so they stay strict: a missing id is
-# a failure, never a skip. Groups D and E are still in flight, so an empty pack is
-# a Skip that names it; the first id that lands puts the whole pack under
+# a failure, never a skip. Groups D, E and F are still in flight, so an empty pack
+# is a Skip that names it; the first id that lands puts the whole pack under
 # contract.
 $script:ArWave3PersistenceLanded = @($script:ArWave3PersistenceTargets | Where-Object {
         $id = $_.Id
@@ -240,13 +258,21 @@ $script:ArWave3LateralLanded = @($script:ArWave3LateralTargets | Where-Object {
         @($script:ArWave3Rows | Where-Object { $_.Id -eq $id }).Count -gt 0
     }).Count -gt 0
 
-# The packs the catalog tests enforce. Groups D and E join only once they land.
+$script:ArWave3RdpLanded = @($script:ArWave3RdpTargets | Where-Object {
+        $id = $_.Id
+        @($script:ArWave3Rows | Where-Object { $_.Id -eq $id }).Count -gt 0
+    }).Count -gt 0
+
+# The packs the catalog tests enforce. Groups D, E and F join only once they land.
 $script:ArWave3CatalogTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets + $script:ArWave3PrivEscTargets)
 if ($script:ArWave3PersistenceLanded) {
     $script:ArWave3CatalogTargets = @($script:ArWave3CatalogTargets + $script:ArWave3PersistenceTargets)
 }
 if ($script:ArWave3LateralLanded) {
     $script:ArWave3CatalogTargets = @($script:ArWave3CatalogTargets + $script:ArWave3LateralTargets)
+}
+if ($script:ArWave3RdpLanded) {
+    $script:ArWave3CatalogTargets = @($script:ArWave3CatalogTargets + $script:ArWave3RdpTargets)
 }
 
 # One pack, one contiguous run of ids: every id between the pack's first and
@@ -341,6 +367,17 @@ Describe 'wave3 catalog ids' {
         It 'declares the lateral-movement ids as one contiguous block from 620 to 624' {
             Assert-ArWave3ContiguousBlock -Targets $script:ArWave3LateralTargets `
                 -Message 'the wave3 lateral-movement ids are not the contiguous block 620..624'
+        }
+    }
+
+    if (-not $script:ArWave3RdpLanded) {
+        It-Skip -Name 'declares the RDP ids as one contiguous block from 720 to 725' `
+            -Reason 'the wave3 RDP catalog entries (ids 720..725) are not in src\*.ps1 yet: the catalog worker has not landed them. From the first landed id this block is enforced whole'
+    }
+    else {
+        It 'declares the RDP ids as one contiguous block from 720 to 725' {
+            Assert-ArWave3ContiguousBlock -Targets $script:ArWave3RdpTargets `
+                -Message 'the wave3 RDP ids are not the contiguous block 720..725'
         }
     }
 
@@ -489,7 +526,7 @@ Describe 'wave3 locale keys' {
 }
 
 # --------------------------------------------------------------------------- #
-# contract 4 - the group C, D and E writers name their cleanup mechanism in
+# contract 4 - the group C, D, E and F writers name their cleanup mechanism in
 # their own body
 # --------------------------------------------------------------------------- #
 
@@ -612,6 +649,59 @@ Describe 'wave3 cleanup contracts' {
             FinallyPattern = '(?i)(Remove-PSSession|Disconnect-PSSession|Remove-AR[A-Za-z]*Session|Close-ARTargetSession|\$closeBlock)'
             FinallyPatterns = @()
         }
+        # The RDP pack. 720, 721 and 724 have no artifact to register: the first
+        # and last only read the target, and 721 changes a live session without
+        # leaving a service, task or file behind. A row with no Pattern is a
+        # statement that the handler leaves nothing, and the loop below never
+        # asks a teardown of it. 722 and 725 are the only two that touch state.
+        [pscustomobject]@{
+            Id             = '720'
+            Handler        = 'Invoke-ARAttackRdpSessions'
+            Mechanism      = 'nothing: read-only, it lists sessions with query session and its CIM equivalent'
+            Pattern        = $null
+            FinallyPattern = $null
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '721'
+            Handler        = 'Invoke-ARAttackRdpDisconnect'
+            Mechanism      = 'nothing: it disconnects or logs off the chosen session and leaves no service, task or file behind'
+            Pattern        = $null
+            FinallyPattern = $null
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '722'
+            Handler        = 'Invoke-ARAttackRdpNlaOff'
+            Mechanism      = 'ARRegistryBackup, with the previous UserAuthentication value replayed in a finally'
+            Pattern        = 'ARRegistryBackup'
+            FinallyPattern = '(?i)(?=[\s\S]*(?:ARRegistryBackup|Restore-AR[A-Za-z]*Registr))'
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '723'
+            Handler        = 'Invoke-ARAttackRdpBrute'
+            Mechanism      = 'nothing: it refuses to run without -Yes ($script:ARAssumeYes) and writes nothing to the target'
+            Pattern        = '(?i)(?=\$(?:script:)?(?:ARAssumeYes|Yes)\b)(?=[\s\S]*(?:\bthrow\b|Read-ARValue|\breturn\b))'
+            FinallyPattern = $null
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '724'
+            Handler        = 'Invoke-ARAttackRdpCertificate'
+            Mechanism      = 'nothing: read-only, it reads the certificate thumbprint and expiry'
+            Pattern        = $null
+            FinallyPattern = $null
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '725'
+            Handler        = 'Invoke-ARAttackRdpFile'
+            Mechanism      = 'a .rdp file written on the operator, under the loot directory or _sandbox\, and its path returned'
+            Pattern        = '(?i)(?=[\s\S]*\.rdp)(?=[\s\S]*(?:Get-ARLootDirectory|Loot|_sandbox))'
+            FinallyPattern = $null
+            FinallyPatterns = @()
+        }
     )
 
     foreach ($contract in $script:ArWave3CleanupContracts) {
@@ -624,7 +714,12 @@ Describe 'wave3 cleanup contracts' {
         It $testName {
             Assert-Equal 1 $definitions.Count ('{0} (id {1}) is defined {2} times; the cleanup contract reads exactly one body' -f $contract.Handler, $contract.Id, $definitions.Count)
             $text = Get-ArWave3CodeText -Text (Get-ArWave3FunctionText -Definition $definitions[0])
-            Assert-Match $text $contract.Pattern ('id {0} ({1}) never names {2} in its own body, so whatever it writes to the target is not registered for cleanup' -f $contract.Id, $contract.Handler, $contract.Mechanism)
+            # A row with no Pattern is a read-only handler: there is no artifact
+            # to name and no teardown to prove, and asserting on the read would
+            # bind the test to one implementation of it.
+            if (-not [string]::IsNullOrWhiteSpace([string]$contract.Pattern)) {
+                Assert-Match $text $contract.Pattern ('id {0} ({1}) never names {2} in its own body, so whatever it writes to the target is not registered for cleanup' -f $contract.Id, $contract.Handler, $contract.Mechanism)
+            }
             $finallyPatterns = @()
             if (-not [string]::IsNullOrWhiteSpace([string]$contract.FinallyPattern)) {
                 $finallyPatterns += [string]$contract.FinallyPattern
