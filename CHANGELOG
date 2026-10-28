@@ -1,3 +1,15 @@
+# Versión 6.0 — wave 3e (movimiento lateral)
+• Cinco acciones nuevas de movimiento lateral en un grupo propio, el noveno del catálogo: el catálogo pasa de 83 a 88 acciones y de 8 a 9 grupos, con 620 Pivot proxy, 621 SOCKS over WinRM, 622 Remote share mount, 623 PsExec hop y 624 WinRM hop
+• Las cinco declaran -NeedsSession $true: usan el objetivo actual como puente hacia un segundo host o hacia un servicio que el objetivo alcanza, y cuatro de ellas abren o tunelan un segundo canal desde ahí
+• 620 lista las reglas de netsh interface portproxy antes de escribir la suya y registra cada listenport en $script:ARPortProxyPorts; -Remove borra solo las reglas que creó
+• 621 levanta un listener SOCKS5 en el operador y lo tunela por la sesión WinRM; imprime la cadena de conexión y cierra el listener y su relay en un finally
+• 622 guarda la credencial con cmdkey y monta el recurso con net use; el finally hace net use /delete y cmdkey /delete, y la contraseña nunca se imprime
+• 623 ejecuta el payload en un segundo host por SMB/PsExec y desconecta la sesión intermedia sin dejar servicio ni tarea; 624 encadena una sesión WinRM al segundo host y la cierra en un finally
+• Claves de idioma nuevas: txt236 a txt247 (el grupo y cinco pares título/descripción), con el mismo juego de 247 claves en los siete ficheros, BOM y CRLF conservados
+• docs\MODULES.md pasa a 88 acciones y gana la sección 620-624 en el grupo Lateral movement, entre Networking / Pivoting y Remote Desktop Forensics, con la tabla id / acción / handler / qué necesita y la nota de limpieza de cada mecanismo
+• Tests\Wave3.Tests.ps1 amplía el pack de movimiento lateral (entrada única, handler esperado, definición única, bloque contiguo 620-624, puerta de sesión y clave de título en los siete idiomas), añade cinco contratos de limpieza y deja la misma puerta de aterrizaje que el pack D: mientras las entradas del catálogo no hayan aterrizado, el bloque contiguo sale como un único skip que lo nombra
+• Tests\Test-Tui.ps1 pasa a esperar 88 acciones y 9 grupos
+
 # Versión 6.0 — deuda de títulos (txt217 a txt225)
 
 • Nueve acciones anteriores a la wave 3 llevaban el título como cadena literal y por tanto no se traducían en ninguna interfaz: 101, 103, 301, 302, 303, 304, 501, 502 y 503

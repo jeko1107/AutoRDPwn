@@ -1,7 +1,7 @@
 # Modules
 
 One section per catalog action, in catalog order, grouped by the category buckets
-that `Get-ARActionCategories` builds from the catalog. There are 83 actions.
+that `Get-ARActionCategories` builds from the catalog. There are 88 actions.
 
 Unless a section says otherwise, an action needs a target in the target editor
 and a working WinRM session (TCP 5985) to that target. "Leaves" lists what the
@@ -10,9 +10,9 @@ and `Invoke-ARCleanup`, which run from the `finally` block on exit. Actions that
 pull a file back write it under `%LOCALAPPDATA%\AutoRDPwn\loot\` on the operator
 and delete the remote copy.
 
-Actions 205 to 207, 220 to 229, 320 to 332, 420 to 427, 520 to 524, 801 to 805,
-901 to 904 and 504 are implemented in `src\02-actions.ps1`. Read the handler
-before scripting against it.
+Actions 205 to 207, 220 to 229, 320 to 332, 420 to 427, 520 to 524, 620 to 624,
+801 to 805, 901 to 904 and 504 are implemented in `src\02-actions.ps1`. Read the
+handler before scripting against it.
 
 ## Quick actions
 
@@ -202,6 +202,39 @@ handler is where the exact fields of each row are defined.
 - Needs: a session; a folder path on the target.
 - Runs: prompts for the folder, compresses `<folder>\*` into `C:\Windows\Temp\W<8 hex>.zip` with `Compress-Archive`, pulls it to `%LOCALAPPDATA%\AutoRDPwn\loot\exfil\<target>-<yyyyMMdd-HHmmss>.zip` and prints the entry count and size. A local target compresses straight into the loot folder with no staging copy. Handler: `Invoke-ARModuleFileExfil`.
 - Leaves: nothing on the target - the remote zip is deleted in a `finally`, even when the pull failed. An empty path or a missing folder is reported and nothing is written; the local zip stays in the loot folder.
+
+## Lateral movement
+
+### 620-624. Lateral movement pack
+
+Five actions that use the current target as a bridge to a second host or to a
+service it can reach. All five carry `-NeedsSession $true`: they ride the session
+to the current target, and four of them open or tunnel a second channel from
+there. None of the five is read-only.
+
+| id | action | handler | what it needs |
+| --- | --- | --- | --- |
+| 620 | Pivot proxy | `Invoke-ARModulePivotProxy` | session; `netsh interface portproxy` rights on the target and a free listen port |
+| 621 | SOCKS over WinRM | `Invoke-ARModuleSocksOverWinRm` | session; a free local port on the operator |
+| 622 | Remote share mount | `Invoke-ARModuleShareMount` | session; a UNC path, an account and its password |
+| 623 | PsExec hop | `Invoke-ARModuleHopPsExec` | session; SMB (445), credentials or an NTLM hash and administrative rights on the second host |
+| 624 | WinRM hop | `Invoke-ARModuleHopWinRm` | session; WinRM (5985) and administrative rights on the second host |
+
+- Runs: 620 lists the existing `netsh interface portproxy` rules before it writes
+  one, then prints the rule and the address to connect to. 621 starts a SOCKS5
+  listener on the operator, tunnels it over the WinRM session and prints the
+  connection string. 622 stores the credential with `cmdkey` and mounts the share
+  with `net use`. 623 runs the payload on the second host over SMB, and 624 chains
+  a WinRM session to the second host through the current one.
+- Cleanup: 620 adds every `listenport` it creates to `$script:ARPortProxyPorts`,
+  and `-Remove` deletes only the rules it recorded; 621 closes the listener and
+  its background relay in a `finally`; 622 runs `net use /delete` and `cmdkey /delete` in
+  a `finally` and never prints the password; 623 disconnects the intermediate
+  session and removes the temporary service, so nothing is left on the second
+  host; 624 closes the second-host session in a `finally`.
+- Note: each of the five names its cleanup mechanism in its own body
+  (`Tests\Wave3.Tests.ps1` enforces that), so the channel and its teardown cannot
+  drift apart.
 
 ## Remote Desktop Forensics
 

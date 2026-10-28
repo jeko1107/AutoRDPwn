@@ -704,6 +704,13 @@ function Get-ARActionCatalog {
     $items.Add((New-ARAction -Id '207' -Title (Get-ARText 'txt165' 'Credential spray') -Description 'Try one password against a list of users over SMB and report the hits' -Handler 'Invoke-ARAttackCredentialSpray' -NeedsSession $false))
     $items.Add((New-ARAction -Id '901' -Title (Get-ARText 'txt171' 'File exfiltration') -Description 'Zip a folder on the target and pull the archive back to the operator' -Handler 'Invoke-ARModuleFileExfil' -NeedsSession $true))
 
+    $items.Add((New-ARGroup -Title (Get-ARText 'txt236' 'Lateral movement') -Description (Get-ARText 'txt237' 'Hops and pivots that reach a second host through the current one')))
+    $items.Add((New-ARAction -Id '620' -Title (Get-ARText 'txt238' 'Pivot proxy') -Description (Get-ARText 'txt239' 'netsh interface portproxy on the target for a chosen port pair, registered for cleanup') -Handler 'Invoke-ARModulePivotProxy' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '621' -Title (Get-ARText 'txt240' 'SOCKS over WinRM') -Description (Get-ARText 'txt241' 'SOCKS5 listener on the operator tunnelled through the WinRM session, prints the connection string') -Handler 'Invoke-ARModuleSocksOverWinRm' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '622' -Title (Get-ARText 'txt242' 'Remote share mount') -Description (Get-ARText 'txt243' 'Mount a remote share with given credentials, unmount in finally') -Handler 'Invoke-ARModuleShareMount' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '623' -Title (Get-ARText 'txt244' 'PsExec hop') -Description (Get-ARText 'txt245' 'Run the payload on a second host over SMB with credentials or a hash') -Handler 'Invoke-ARModuleHopPsExec' -NeedsSession $true))
+    $items.Add((New-ARAction -Id '624' -Title (Get-ARText 'txt246' 'WinRM hop') -Description (Get-ARText 'txt247' 'Chain a WinRM session to a second host through the current target') -Handler 'Invoke-ARModuleHopWinRm' -NeedsSession $true))
+
     $items.Add((New-ARGroup -Title (Get-ARText 'txt207' 'Discovery') -Description (Get-ARText 'txt208' 'Enumerate the host, its accounts, its defences and its exposure')))
     $items.Add((New-ARAction -Id '320' -Title (Get-ARText 'txt194' 'Host audit') -Description 'Collect OS build, uptime, domain, hotfix level and hardware in one pass' -Handler 'Invoke-ARModuleHostAudit' -NeedsSession $false))
     $items.Add((New-ARAction -Id '321' -Title (Get-ARText 'txt195' 'AV and EDR enumeration') -Description 'List registered antivirus products, their real-time state and any EDR drivers loaded' -Handler 'Invoke-ARModuleAvEnum' -NeedsSession $false))

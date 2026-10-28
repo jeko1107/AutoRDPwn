@@ -1,29 +1,31 @@
 # Tests\Wave3.Tests.ps1
 #
-# Wave 3 contracts for the merge gate. Four packs share this file:
+# Wave 3 contracts for the merge gate. Five packs share this file:
 #
 #   group A, credential access, ids 220..229
 #   group B, discovery, ids 320..332
 #   group C, privilege escalation, ids 420..427
 #   group D, backdoors and persistence, ids 520..524
+#   group E, lateral movement, ids 620..624
 #
 #   1. catalog: exactly one entry for every id in each pack, each mapped to its
 #      expected handler, each pack forming one contiguous block, no catalog id
 #      declared twice, and every id gated with -NeedsSession $false except 227
-#      (Kerberos cache runs against a live session) and the 520..524 pack, which
-#      needs a session like the rest of the persistence group. Group D is gated
-#      on its landing state: while no 520..524 row exists in the catalog the pack
-#      is one Skip that names it, and from the first landed id the whole pack is
-#      enforced. Published packs A, B and C carry no such gate.
+#      (Kerberos cache runs against a live session), the 520..524 pack and the
+#      620..624 pack, which need a session like the rest of their groups. Groups
+#      D and E are gated on their landing state: while no 520..524 (or 620..624)
+#      row exists in the catalog the pack is one Skip that names it, and from the
+#      first landed id the whole pack is enforced. Published packs A, B and C
+#      carry no such gate.
 #   2. handlers: every wave3 handler is defined exactly once across src\*.ps1
 #      (AST function definitions, never grep), and no handler named by any
 #      New-ARAction call is defined twice anywhere in src\.
 #   3. locale: each wave3 catalog entry carries a Get-ARText title key and that
 #      key resolves in all seven language files.
-#   4. cleanup: the nine wave3 handlers that write to the target name the
-#      mechanism they register with, and 426, 521 and 524 clean up inside a
-#      finally. The assertion is scoped to the handler's own AST extent, never
-#      src-wide.
+#   4. cleanup: every wave3 handler that writes to the target or the operator
+#      names the mechanism it registers with, and every handler whose cleanup is
+#      a finally proves the removal inside that finally. The assertion is scoped
+#      to the handler's own AST extent, never src-wide.
 #   5. arguments: no remote call splats a collection into its own argument list.
 #      -ArgumentList $array and -ArgumentList @($array.ToArray()) both hand the
 #      scriptblock only element 0, which silently halves every cleanup loop.
@@ -207,24 +209,44 @@ $script:ArWave3PersistenceTargets = @(
     [pscustomobject]@{ Id = '524'; Handler = 'Invoke-ARModuleWmiSubscription';   NeedsSession = $true }
 )
 
+# The five lateral-movement ids of wave 3e. All five carry -NeedsSession $true:
+# each one pivots through the current target, so it needs the session it tunnels
+# over. All five are covered by the cleanup contract below.
+$script:ArWave3LateralTargets = @(
+    [pscustomobject]@{ Id = '620'; Handler = 'Invoke-ARModulePivotProxy';     NeedsSession = $true }
+    [pscustomobject]@{ Id = '621'; Handler = 'Invoke-ARModuleSocksOverWinRm'; NeedsSession = $true }
+    [pscustomobject]@{ Id = '622'; Handler = 'Invoke-ARModuleShareMount';     NeedsSession = $true }
+    [pscustomobject]@{ Id = '623'; Handler = 'Invoke-ARModuleHopPsExec';      NeedsSession = $true }
+    [pscustomobject]@{ Id = '624'; Handler = 'Invoke-ARModuleHopWinRm';       NeedsSession = $true }
+)
+
 # Every pack, for the checks that apply to every wave3 id.
-$script:ArWave3AllTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets + $script:ArWave3PrivEscTargets + $script:ArWave3PersistenceTargets)
+$script:ArWave3AllTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets + $script:ArWave3PrivEscTargets + $script:ArWave3PersistenceTargets + $script:ArWave3LateralTargets)
 
 $script:ArWave3Rows = @(Get-ArWave3CatalogRows)
 
 # Landing gate for the pack whose catalog worker writes in the same window as
 # this file. Packs A, B and C are published, so they stay strict: a missing id is
-# a failure, never a skip. Group D is still in flight, so an empty pack is a
-# Skip that names it; the first id that lands puts the whole pack under contract.
+# a failure, never a skip. Groups D and E are still in flight, so an empty pack is
+# a Skip that names it; the first id that lands puts the whole pack under
+# contract.
 $script:ArWave3PersistenceLanded = @($script:ArWave3PersistenceTargets | Where-Object {
         $id = $_.Id
         @($script:ArWave3Rows | Where-Object { $_.Id -eq $id }).Count -gt 0
     }).Count -gt 0
 
-# The packs the catalog tests enforce. Group D joins only once it has landed.
+$script:ArWave3LateralLanded = @($script:ArWave3LateralTargets | Where-Object {
+        $id = $_.Id
+        @($script:ArWave3Rows | Where-Object { $_.Id -eq $id }).Count -gt 0
+    }).Count -gt 0
+
+# The packs the catalog tests enforce. Groups D and E join only once they land.
 $script:ArWave3CatalogTargets = @($script:ArWave3Targets + $script:ArWave3DiscoveryTargets + $script:ArWave3PrivEscTargets)
 if ($script:ArWave3PersistenceLanded) {
     $script:ArWave3CatalogTargets = @($script:ArWave3CatalogTargets + $script:ArWave3PersistenceTargets)
+}
+if ($script:ArWave3LateralLanded) {
+    $script:ArWave3CatalogTargets = @($script:ArWave3CatalogTargets + $script:ArWave3LateralTargets)
 }
 
 # One pack, one contiguous run of ids: every id between the pack's first and
@@ -308,6 +330,17 @@ Describe 'wave3 catalog ids' {
         It 'declares the persistence ids as one contiguous block from 520 to 524' {
             Assert-ArWave3ContiguousBlock -Targets $script:ArWave3PersistenceTargets `
                 -Message 'the wave3 persistence ids are not the contiguous block 520..524'
+        }
+    }
+
+    if (-not $script:ArWave3LateralLanded) {
+        It-Skip -Name 'declares the lateral-movement ids as one contiguous block from 620 to 624' `
+            -Reason 'the wave3 lateral-movement catalog entries (ids 620..624) are not in src\*.ps1 yet: the catalog worker has not landed them. From the first landed id this block is enforced whole'
+    }
+    else {
+        It 'declares the lateral-movement ids as one contiguous block from 620 to 624' {
+            Assert-ArWave3ContiguousBlock -Targets $script:ArWave3LateralTargets `
+                -Message 'the wave3 lateral-movement ids are not the contiguous block 620..624'
         }
     }
 
@@ -456,8 +489,8 @@ Describe 'wave3 locale keys' {
 }
 
 # --------------------------------------------------------------------------- #
-# contract 4 - the group C and D writers name their cleanup mechanism in their
-# own body
+# contract 4 - the group C, D and E writers name their cleanup mechanism in
+# their own body
 # --------------------------------------------------------------------------- #
 
 Describe 'wave3 cleanup contracts' {
@@ -538,6 +571,46 @@ Describe 'wave3 cleanup contracts' {
             Pattern        = '(?i)(?=[\s\S]*__EventFilter)(?=[\s\S]*CommandLineEventConsumer)(?=[\s\S]*__FilterToConsumerBinding)'
             FinallyPattern = $null
             FinallyPatterns = @('__EventFilter', 'CommandLineEventConsumer', '__FilterToConsumerBinding')
+        }
+        [pscustomobject]@{
+            Id             = '620'
+            Handler        = 'Invoke-ARModulePivotProxy'
+            Mechanism      = '$script:ARPortProxyPorts'
+            Pattern        = 'ARPortProxyPorts'
+            FinallyPattern = $null
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '621'
+            Handler        = 'Invoke-ARModuleSocksOverWinRm'
+            Mechanism      = 'the listener and its background relay, closed in a finally'
+            Pattern        = '(?i)(?=[\s\S]*(?:TcpListener|[Ll]istener))(?=[\s\S]*(?:[Rr]unspace|Start-Job|\bJob\b))'
+            FinallyPattern = '(?i)(\.(?:Stop|Close|Dispose)\(|Remove-AR[A-Za-z]*(?:Listener|Firewall))'
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '622'
+            Handler        = 'Invoke-ARModuleShareMount'
+            Mechanism      = 'net use /delete and cmdkey /delete in a finally'
+            Pattern        = '(?i)(?=[\s\S]*cmdkey)(?=[\s\S]*net\s+use\b)'
+            FinallyPattern = '(?i)(?:net\s+use\b[^\r\n]*/delete|cmdkey\b[^\r\n]*/delete|\$cleanBlock)'
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '623'
+            Handler        = 'Invoke-ARModuleHopPsExec'
+            Mechanism      = 'the intermediate session it disconnects or the temporary service it removes, so nothing stays on the second host'
+            Pattern        = '(?i)(Remove-PSSession|Disconnect-PSSession|Remove-AR[A-Za-z]*(?:Session|Service)|sc(?:\.exe)?\b[^\r\n]*[''"]?delete|Remove-Service)'
+            FinallyPattern = $null
+            FinallyPatterns = @()
+        }
+        [pscustomobject]@{
+            Id             = '624'
+            Handler        = 'Invoke-ARModuleHopWinRm'
+            Mechanism      = 'the second-host session, closed in a finally'
+            Pattern        = '(?i)(New-PSSession|Invoke-ARRemote)'
+            FinallyPattern = '(?i)(Remove-PSSession|Disconnect-PSSession|Remove-AR[A-Za-z]*Session|Close-ARTargetSession|\$closeBlock)'
+            FinallyPatterns = @()
         }
     )
 
